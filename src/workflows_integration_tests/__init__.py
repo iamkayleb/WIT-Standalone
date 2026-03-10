@@ -1,10 +1,8 @@
-'EOF'
-  """Workflows Integration Tests package."""
+"""Workflows Integration Tests package."""
 
-  __version__ = "0.1.0"
+__version__ = "0.1.0"
 
 
-  def hello() -> str:
-      """Return a greeting."""
-      return "Hello, World!"
-EOF
+def hello() -> str:
+    """Return a greeting."""
+    return "Hello, World!"
