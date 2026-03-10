@@ -70,7 +70,7 @@ jobs:
             core.setOutput('pr_number', pr.number);
             core.setOutput('comment_id', comment.id);
             // Encode comment body as Base64 to safely handle multiline and special characters.
-            // The reusable workflow at iamkayleb/Workflows/.github/workflows/reusable-20-pr-meta.yml
+            // The reusable workflow at stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml
             // expects this value to be Base64-encoded and is responsible for decoding it.
             core.setOutput('comment_body', Buffer.from(comment.body || '').toString('base64'));
 
@@ -78,9 +78,9 @@ jobs:
   pr_meta_comment:
     needs: resolve_pr
     if: github.event_name == 'issue_comment' && github.event.issue.pull_request
-    uses: iamkayleb/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
+    uses: stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
     with:
-      pr_number: ${{ fromJSON(needs.resolve_pr.outputs.pr_number) }}
+      pr_number: ${{fromJSON(needs.resolve_pr.outputs.pr_number)}}
       comment_id: ${{ needs.resolve_pr.outputs.comment_id }}
       comment_body: ${{ needs.resolve_pr.outputs.comment_body }}
       event_name: 'issue_comment'
@@ -92,7 +92,7 @@ jobs:
   # Call reusable PR meta workflow for PR events
   pr_meta_pr:
     if: github.event_name == 'pull_request'
-    uses: iamkayleb/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
+    uses: stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
     with:
       pr_number: ${{ github.event.pull_request.number }}
       event_name: 'pull_request'
@@ -128,7 +128,7 @@ jobs:
     if: |
       github.event_name == 'workflow_run' &&
       needs.resolve_pr_from_workflow_run.outputs.should_run == 'true'
-    uses: iamkayleb/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
+    uses: stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
     with:
       pr_number: ${{ fromJSON(needs.resolve_pr_from_workflow_run.outputs.pr_number) }}
       event_name: 'workflow_run'
