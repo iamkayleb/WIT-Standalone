@@ -259,9 +259,6 @@ def _fallback_classify(
             continue
         actionable.append(task)
 
-    if reason:
-        human_actions.append(reason)
-
     if blocked:
         recommendation = "BLOCKED"
     elif partial or not tasks:
