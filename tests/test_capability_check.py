@@ -44,3 +44,27 @@ def test_classify_capabilities_empty_string() -> None:
     result = classify_capabilities("", "")
     assert result.actionable_tasks == []
     assert result.recommendation == "REVIEW_NEEDED"
+
+
+def test_fallback_does_not_expose_llm_diagnostic_as_human_action() -> None:
+    """Infrastructure reasons like 'LLM provider unavailable' must NOT appear in
+    human_actions_needed — they are diagnostic messages, not actions for humans."""
+    # Without API keys the fallback path is always taken in CI; none of the
+    # diagnostic strings used there should surface as a required human action.
+    result = classify_capabilities(["Create a minimal change", "Validate pipeline"], "")
+    diagnostic_phrases = [
+        "LLM provider unavailable",
+        "langchain-core not installed",
+        "LLM response missing JSON payload",
+        "LLM response JSON parse failed",
+    ]
+    for phrase in diagnostic_phrases:
+        assert phrase not in result.human_actions_needed, (
+            f"Infrastructure message '{phrase}' must not appear in human_actions_needed"
+        )
+
+
+def test_fallback_empty_tasks_no_llm_diagnostic_in_human_actions() -> None:
+    """Even with no tasks, 'LLM provider unavailable' must not appear as a human action."""
+    result = classify_capabilities("", "")
+    assert "LLM provider unavailable" not in result.human_actions_needed
