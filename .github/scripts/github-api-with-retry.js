@@ -113,8 +113,51 @@ async function paginateWithRetry(github, method, params, options = {}) {
   );
 }
 
+/**
+ * Token-aware retry factory for GitHub API calls.
+ *
+ * Returns an object with the Octokit client and retry helpers that pass the
+ * client through to callbacks, matching the calling convention used by all
+ * workflow scripts (e.g., `withRetry((client) => client.rest.issues.get(…))`).
+ *
+ * @param {Object} opts
+ * @param {Object} opts.github - Octokit instance from actions/github-script
+ * @param {Object} [opts.core] - Core helpers from actions/github-script
+ * @param {Object} [opts.env] - Environment variables (process.env)
+ * @param {string} [opts.task] - Label for logging
+ * @param {string[]} [opts.capabilities] - Required token capabilities
+ * @param {number} [opts.minRemaining] - Minimum remaining rate-limit budget
+ * @returns {Promise<{github: Object, withRetry: Function, paginateWithRetry: Function}>}
+ */
+async function createTokenAwareRetry(opts = {}) {
+  const { github: client, task } = opts;
+  if (!client) {
+    throw new Error('createTokenAwareRetry: github (Octokit) instance is required');
+  }
+  if (task) {
+    console.log(`[token-aware-retry] Initialised for task: ${task}`);
+  }
+
+  // Token-aware withRetry: passes the client to the callback so callers can
+  // write `withRetry((api) => api.rest.issues.get(…))`.
+  const tokenAwareWithRetry = (fn, options = {}) =>
+    withRetry(() => fn(client), options);
+
+  // Token-aware paginateWithRetry: delegates to the base implementation using
+  // the bound client.
+  const tokenAwarePaginateWithRetry = (method, params, options = {}) =>
+    paginateWithRetry(client, method, params, options);
+
+  return {
+    github: client,
+    withRetry: tokenAwareWithRetry,
+    paginateWithRetry: tokenAwarePaginateWithRetry,
+  };
+}
+
 module.exports = {
   withRetry,
   paginateWithRetry,
-  sleep
+  sleep,
+  createTokenAwareRetry,
 };
