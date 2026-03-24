@@ -1,6 +1,6 @@
 # Gate orchestrates CI enforcement for pull requests. The final `summary`
 # job aggregates artifacts, computes coverage deltas, publishes the commit
-# status, and maintains the consolidated PR comment.
+# status, and maintains the consolidated PR comment. omo
 name: Gate
 
 on:
