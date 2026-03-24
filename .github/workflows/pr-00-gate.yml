@@ -820,16 +820,64 @@ jobs:
             });
 
       - name: Report Gate commit status
-        uses: actions/github-script@v7
+        if: ${{ always() }}
+        uses: actions/github-script@v8
+        env:
+          STATE: >-
+            ${{ steps.summarize.outputs.state || steps.docs_only.outputs.state || 'pending' }}
+          DESCRIPTION: >-
+            ${{
+              steps.summarize.outputs.description ||
+              steps.docs_only.outputs.description ||
+              'Gate status pending'
+            }}
+          TARGET_URL: >-
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         with:
           script: |
-              await github.rest.repos.createCommitStatus({
-                owner, repo, sha,
+            const retryScript = './.github/scripts/github-api-with-retry.js';
+            const { createTokenAwareRetry } = require(retryScript);
+            const { withRetry } = await createTokenAwareRetry({
+              github,
+              core,
+              task: 'gate-commit-status',
+            });
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.payload.pull_request?.head?.sha ?? context.sha;
+            const rawState = process.env.STATE || 'pending';
+            const allowed = new Set(['error', 'failure', 'pending', 'success']);
+            const state = allowed.has(rawState) ? rawState : 'pending';
+            const rawDescription = process.env.DESCRIPTION || 'Gate status update';
+            const description = rawDescription.length > 140
+              ? `${rawDescription.slice(0, 137)}...`
+              : rawDescription;
+            const targetUrl = process.env.TARGET_URL;
+
+            try {
+              await withRetry((client) => client.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha,
                 state,
-                context: 'Gate / gate',  # This exact context is expected
+                context: 'Gate / gate',
                 description,
                 target_url: targetUrl,
-              });
+              }));
+            } catch (error) {
+              const hitRateLimit =
+                error?.status === 403 &&
+                /rate limit/i.test(error?.message || '');
+              if (hitRateLimit) {
+                core.warning(
+                  'Rate limit prevented Gate from updating the commit status; ' +
+                    'leaving existing status untouched.',
+                );
+              } else {
+                throw error;
+              }
+            }
+
       - name: Dispatch autofix notification
         if: ${{ (steps.summarize.outputs.state || steps.docs_only.outputs.state) == 'failure' }}
         uses: actions/github-script@v8
