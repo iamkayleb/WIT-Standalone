@@ -1,3 +1,5 @@
+const { ensureRateLimitWrapped } = require('./github-rate-limited-wrapper.js');
+
 const ISSUE_LABEL_PATTERN = /^agents?:/i;
 
 function sanitizeArray(values) {
@@ -9,7 +11,7 @@ function issueMentionPatterns(issueNumber) {
   if (!Number.isFinite(num) || num <= 0) {
     return [];
   }
-  const escaped = String(num).replace(/[-/\\^$*+?.()|\[\]{}]/g, (m) => `\\${m}`);
+  const escaped = String(num).replace(/[-/\\^$*+?.()|\\[\\]{}]/g, (m) => `\\${m}`);
   return [
     new RegExp(`(^|[^0-9])#${escaped}(?![0-9])`, 'i'),
     new RegExp(`issue\\s*#?${escaped}`, 'i'),
@@ -255,7 +257,10 @@ async function findIssuePrCandidate({ github, core, owner, repo, issueNumber, br
 }
 
 module.exports = {
-  findIssuePrCandidate,
+  findIssuePrCandidate: async function ({ github: rawGithub, core, owner, repo, issueNumber, branchCandidates = [], defaultBranch }) {
+    const github = await ensureRateLimitWrapped({ github: rawGithub, core, env: process.env });
+    return findIssuePrCandidate({ github, core, owner, repo, issueNumber, branchCandidates, defaultBranch });
+  },
   issueMentionPatterns,
   candidateScore,
   selectBestCandidate,
