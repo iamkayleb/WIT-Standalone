@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 from pathlib import Path
 from typing import Any
+
+try:
+    from scripts.langchain.injection_guard import check_prompt_injection
+except ImportError:  # pragma: no cover - fallback for direct invocation
+    from injection_guard import check_prompt_injection
 
 # Maximum issue body size to prevent OpenAI rate limit errors (30k TPM limit)
 # ~4 chars per token, so 50k chars ≈ 12.5k tokens, leaving headroom for prompt + output
@@ -78,7 +82,7 @@ SECTION_TITLES = {
     "implementation": "Implementation Notes",
 }
 
-LIST_ITEM_REGEX = re.compile(r"^(\s*)([-*+]|\d+[.)])\s+(.*)$")
+LIST_ITEM_REGEX = re.compile(r"^(\s*)([-*+]|\d+[.)]|[A-Za-z][.)])\s+(.*)$")
 CHECKBOX_REGEX = re.compile(r"^\[([ xX])\]\s*(.*)$")
 
 
@@ -103,38 +107,14 @@ def _get_llm_client(force_openai: bool = False) -> tuple[object, str] | None:
                       Use this for retry after GitHub Models 401 error.
     """
     try:
-        # Keep imports contiguous; consumer repos treat both as third-party
-        from langchain_openai import ChatOpenAI  # noqa: I001
-        from tools.llm_provider import DEFAULT_MODEL, GITHUB_MODELS_BASE_URL
+        from tools.langchain_client import build_chat_client
     except ImportError:
         return None
 
-    github_token = os.environ.get("GITHUB_TOKEN")
-    openai_token = os.environ.get("OPENAI_API_KEY")
-    if not github_token and not openai_token:
+    resolved = build_chat_client(force_openai=force_openai)
+    if not resolved:
         return None
-
-    # Try GitHub Models first (cheaper) unless forced to use OpenAI
-    if github_token and not force_openai:
-        return (
-            ChatOpenAI(
-                model=DEFAULT_MODEL,
-                base_url=GITHUB_MODELS_BASE_URL,
-                api_key=github_token,
-                temperature=0.1,
-            ),
-            "github-models",
-        )
-    if openai_token:
-        return (
-            ChatOpenAI(
-                model=DEFAULT_MODEL,
-                api_key=openai_token,
-                temperature=0.1,
-            ),
-            "openai",
-        )
-    return None
+    return resolved.client, resolved.provider
 
 
 def _normalize_heading(text: str) -> str:
@@ -185,10 +165,10 @@ def _normalize_checklist_lines(lines: list[str]) -> list[str]:
         stripped = raw.strip()
         if stripped.startswith("```"):
             in_fence = not in_fence
-            cleaned.append(raw)
             continue
         if in_fence:
-            cleaned.append(raw)
+            continue
+        if stripped in {"---", "<details>", "</details>"}:
             continue
         if not stripped:
             continue
@@ -212,7 +192,47 @@ def _parse_sections(body: str) -> tuple[dict[str, list[str]], list[str]]:
     sections: dict[str, list[str]] = {key: [] for key in SECTION_TITLES}
     preamble: list[str] = []
     current: str | None = None
+    code_fence_marker: str | None = None  # exact opening fence (e.g. ```, ````)
+    in_details_block = False
     for line in body.splitlines():
+        stripped = line.strip()
+        # Track code fences — match the exact opening fence length to avoid
+        # being fooled by nested fences of different lengths (e.g. ``` inside ````)
+        fence_match = re.match(r"^(`{3,})", stripped)
+        if fence_match:
+            if code_fence_marker is None:
+                code_fence_marker = fence_match.group(1)
+            elif len(fence_match.group(1)) >= len(code_fence_marker):
+                code_fence_marker = None
+        if code_fence_marker is not None:
+            if current:
+                sections[current].append(line)
+            else:
+                preamble.append(line)
+            continue
+        # Stop parsing at <details> blocks (Original Issue metadata).
+        # Handle both multi-line and inline <details>...</details> on one line.
+        lower_stripped = stripped.lower()
+        if lower_stripped.startswith("<details") and not in_details_block:
+            # Check if </details> also appears on the same line (inline block)
+            if "</details" in lower_stripped:
+                # Entire block on one line — preserve it but don't enter state
+                if current:
+                    sections[current].append(line)
+                else:
+                    preamble.append(line)
+                continue
+            in_details_block = True
+        if in_details_block:
+            if "</details" in lower_stripped:
+                in_details_block = False
+            # Preserve <details> content under the current section so it
+            # survives the round-trip, but don't parse headings from it.
+            if current:
+                sections[current].append(line)
+            else:
+                preamble.append(line)
+            continue
         heading_match = re.match(r"^\s*#{1,6}\s+(.*)$", line)
         if heading_match:
             section_key = _resolve_section(heading_match.group(1))
@@ -370,7 +390,7 @@ def _validate_and_refine_tasks(formatted: str, *, use_llm: bool) -> tuple[str, s
         return formatted, None
 
     try:
-        from . import task_validator
+        from scripts.langchain import task_validator
     except ImportError:
         try:
             import task_validator
@@ -426,6 +446,16 @@ def _is_github_models_auth_error(exc: Exception) -> bool:
 def format_issue_body(issue_body: str, *, use_llm: bool = True) -> dict[str, Any]:
     if not issue_body:
         issue_body = ""
+
+    guard_result = check_prompt_injection(issue_body)
+    if guard_result["blocked"]:
+        return {
+            "formatted_body": issue_body,
+            "provider_used": None,
+            "used_llm": False,
+            "guard_blocked": True,
+            "guard_reason": guard_result["reason"],
+        }
 
     # Check size before processing to avoid rate limit errors
     if len(issue_body) > MAX_ISSUE_BODY_SIZE:
@@ -534,6 +564,9 @@ def main() -> None:
             "used_llm": result.get("used_llm", False),
             "labels": build_label_transition(),
         }
+        if result.get("guard_blocked"):
+            payload["guard_blocked"] = True
+            payload["guard_reason"] = result.get("guard_reason") or ""
         print(json.dumps(payload, ensure_ascii=True))
     else:
         print(result["formatted_body"])

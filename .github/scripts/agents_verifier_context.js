@@ -2,6 +2,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { execFileSync } = require('child_process');
+const { ensureRateLimitWrapped } = require('./github-rate-limited-wrapper.js');
 
 const {
   extractScopeTasksAcceptanceSections,
@@ -12,11 +14,18 @@ const { queryVerifierCiResults } = require('./verifier_ci_query.js');
 
 const DEFAULT_BRANCH = process.env.DEFAULT_BRANCH || 'main';
 const DEFAULT_DIFF_SUMMARY_PATH = 'verifier-diff-summary.md';
+const DEFAULT_DIFF_PATH = 'verifier-pr-diff.patch';
+const DEFAULT_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+const DEFAULT_DIFF_MAX_CHARS = 300000;
+const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
 
 const DIFF_SUMMARY_LIMITS = {
   maxFiles: 50,
   maxLines: 20000,
 };
+
+// Regex to extract follow-up chain depth from issue/PR body HTML comments
+const FOLLOW_UP_DEPTH_RE = /<!--\s*follow-up-depth:\s*(\d+)\s*-->/;
 
 function uniqueNumbers(values) {
   return Array.from(
@@ -190,6 +199,41 @@ function summarizeDiff(diffText, { maxFiles, maxLines } = {}) {
   return summaryLines.join('\n');
 }
 
+function isValidSha(value) {
+  return SHA_PATTERN.test(String(value || ''));
+}
+
+function formatDiffForContext(diffText, maxChars) {
+  const diff = String(diffText || '').trim();
+  if (!diff) {
+    return '_Diff unavailable or empty._';
+  }
+  const limit = Number.isFinite(maxChars) ? maxChars : DEFAULT_DIFF_MAX_CHARS;
+  if (diff.length <= limit) {
+    return diff;
+  }
+  return `${diff.slice(0, limit)}\n\n...diff truncated after ${limit} characters.`;
+}
+
+function fetchLocalGitDiff({ baseSha, headSha, maxBytes, core, execFile = execFileSync }) {
+  if (!baseSha || !headSha) {
+    return '';
+  }
+  if (!isValidSha(baseSha) || !isValidSha(headSha)) {
+    core?.warning?.('Refusing to generate git diff: invalid SHA value.');
+    return '';
+  }
+  try {
+    const buffer = execFile('git', ['diff', '--no-color', `${baseSha}...${headSha}`], {
+      maxBuffer: Number.isFinite(maxBytes) ? maxBytes : DEFAULT_DIFF_MAX_BYTES,
+    });
+    return buffer.toString('utf8');
+  } catch (error) {
+    core?.warning?.(`Failed to generate git diff locally: ${error.message}`);
+    return '';
+  }
+}
+
 async function fetchPullRequestDiff({ github, core, owner, repo, pullNumber }) {
   if (!github?.rest?.pulls?.get) {
     return '';
@@ -213,6 +257,28 @@ async function fetchPullRequestDiff({ github, core, owner, repo, pullNumber }) {
 
 async function resolvePullRequest({ github, context, core }) {
   const { owner, repo } = context.repo;
+
+  const envPrNumber = process.env.VERIFIER_PR_NUMBER;
+  if (envPrNumber) {
+    const prNumber = Number(envPrNumber);
+    if (Number.isFinite(prNumber) && prNumber > 0) {
+      try {
+        const { data: pr } = await github.rest.pulls.get({
+          owner,
+          repo,
+          pull_number: prNumber,
+        });
+        if (!pr || pr.merged !== true) {
+          return { pr: null, reason: `Pull request #${prNumber} is not merged; skipping verifier.` };
+        }
+        return { pr };
+      } catch (error) {
+        core?.warning?.(`Failed to resolve PR #${envPrNumber}: ${error.message}`);
+        return { pr: null, reason: `Unable to resolve pull request #${envPrNumber}.` };
+      }
+    }
+    core?.warning?.(`Invalid VERIFIER_PR_NUMBER: ${envPrNumber}`);
+  }
 
   // Handle pull_request and pull_request_target events (both have PR in payload)
   if (context.eventName === 'pull_request' || context.eventName === 'pull_request_target') {
@@ -258,6 +324,11 @@ async function fetchClosingIssues({ github, core, owner, repo, prNumber }) {
               body
               state
               url
+              labels(first: 100) {
+                nodes {
+                  name
+                }
+              }
             }
           }
         }
@@ -275,6 +346,7 @@ async function fetchClosingIssues({ github, core, owner, repo, prNumber }) {
       body: issue.body || '',
       state: issue.state || 'UNKNOWN',
       url: issue.url || '',
+      labels: issue.labels?.nodes || [],
     }));
   } catch (error) {
     core?.warning?.(`Failed to fetch closing issues: ${error.message}`);
@@ -297,6 +369,8 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
     core?.setOutput?.('acceptance_count', '0');
     core?.setOutput?.('ci_results', '[]');
     core?.setOutput?.('diff_summary_path', '');
+    core?.setOutput?.('diff_path', '');
+    core?.setOutput?.('chain_depth', '0');
     return {
       shouldRun: false,
       reason: resolveReason || 'No pull request detected.',
@@ -304,26 +378,10 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
     };
   }
 
-  const baseRef = pr.base?.ref || '';
-  const defaultBranch = context.payload?.repository?.default_branch || DEFAULT_BRANCH;
-  if (baseRef && baseRef !== defaultBranch) {
-    const skipReason = `Pull request base ref ${baseRef} does not match default branch ${defaultBranch}; skipping verifier.`;
-    core?.notice?.(skipReason);
-    core?.setOutput?.('should_run', 'false');
-    core?.setOutput?.('skip_reason', skipReason);
-    core?.setOutput?.('pr_number', String(pr.number || ''));
-    core?.setOutput?.('issue_numbers', '[]');
-    core?.setOutput?.('pr_html_url', pr.html_url || '');
-    core?.setOutput?.('target_sha', pr.merge_commit_sha || pr.head?.sha || context.sha || '');
-    core?.setOutput?.('context_path', '');
-    core?.setOutput?.('acceptance_count', '0');
-    core?.setOutput?.('ci_results', '[]');
-    core?.setOutput?.('diff_summary_path', '');
-    return { shouldRun: false, reason: skipReason, ciResults: [] };
-  }
-
   const prDetails = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
   const pull = prDetails?.data || pr;
+  const baseRef = pull.base?.ref || pr.base?.ref || '';
+  const defaultBranch = context.payload?.repository?.default_branch || DEFAULT_BRANCH;
 
   if (isForkPullRequest(pull)) {
     const skipReason = 'Pull request is from a fork; skipping verifier.';
@@ -338,6 +396,8 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
     core?.setOutput?.('acceptance_count', '0');
     core?.setOutput?.('ci_results', '[]');
     core?.setOutput?.('diff_summary_path', '');
+    core?.setOutput?.('diff_path', '');
+    core?.setOutput?.('chain_depth', '0');
     return { shouldRun: false, reason: skipReason, ciResults: [] };
   }
 
@@ -408,12 +468,34 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
   content.push('');
   content.push(`- Repository: ${owner}/${repo}`);
   content.push(`- Base branch: ${baseRef || defaultBranch}`);
+
+  // Extract chain depth from issue/PR bodies (set by agents-verify-to-new-pr.yml)
+  let chainDepth = 0;
+  const allBodies = [pull.body || '', ...closingIssues.map((i) => i.body || '')];
+  for (const body of allBodies) {
+    const match = body.match(FOLLOW_UP_DEPTH_RE);
+    if (match) {
+      const depth = parseInt(match[1], 10);
+      if (depth > chainDepth) chainDepth = depth;
+    }
+  }
+  // Also check for follow-up label on linked issues as a depth-1 indicator
+  if (chainDepth === 0) {
+    for (const issue of closingIssues) {
+      if (issue.labels && issue.labels.some((l) => l.name === 'follow-up')) {
+        chainDepth = Math.max(chainDepth, 1);
+      }
+    }
+  }
   const ciTargetShas = [pull.merge_commit_sha, pull.head?.sha, context.sha].filter(Boolean);
   const targetSha = ciTargetShas[0] || '';
   if (targetSha) {
     content.push(`- Target commit: \`${targetSha}\``);
   }
   content.push(`- Pull request: [#${pull.number}](${pull.html_url || ''})`);
+  if (chainDepth > 0) {
+    content.push(`- Chain depth: ${chainDepth} (follow-up iteration)`);
+  }
   content.push('');
 
   // Parse ciWorkflows if provided (can be array or JSON string)
@@ -452,11 +534,26 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
   content.push('The CI results below are provided only to confirm which test suites ran, not for status evaluation.');
   content.push('');
   if (ciResults.length) {
-    content.push('| Workflow | Conclusion | Run |');
-    content.push('| --- | --- | --- |');
+    content.push('| Workflow | Conclusion | Run | Jobs (summary) |');
+    content.push('| --- | --- | --- | --- |');
     for (const result of ciResults) {
       const runLink = result.run_url ? `[run](${result.run_url})` : 'n/a';
-      content.push(`| ${result.workflow_name} | ${result.conclusion} | ${runLink} |`);
+      const jobsSummary = result.jobs_summary || {};
+      let jobsText = 'n/a';
+      if (jobsSummary.total) {
+        const counts = jobsSummary.conclusions || {};
+        const countParts = Object.entries(counts)
+          .filter(([, value]) => value)
+          .map(([key, value]) => `${key}: ${value}`);
+        const samples = Array.isArray(jobsSummary.samples)
+          ? jobsSummary.samples.map((job) => `${job.name} (${job.conclusion})`)
+          : [];
+        const sampleText = samples.length
+          ? `samples: ${samples.join('; ')}${jobsSummary.truncated ? '…' : ''}`
+          : '';
+        jobsText = [countParts.join(', '), sampleText].filter(Boolean).join('<br>');
+      }
+      content.push(`| ${result.workflow_name} | ${result.conclusion} | ${runLink} | ${jobsText} |`);
     }
   } else {
     content.push('_No CI workflow runs were found for the target commit._');
@@ -490,25 +587,51 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
     core?.setOutput?.('acceptance_count', '0');
     core?.setOutput?.('ci_results', JSON.stringify(ciResults));
     core?.setOutput?.('diff_summary_path', '');
+    core?.setOutput?.('diff_path', '');
+    core?.setOutput?.('chain_depth', String(chainDepth));
     return { shouldRun: false, reason: skipReason, ciResults };
   }
 
-  const diffText = await fetchPullRequestDiff({
-    github,
+  const diffMaxBytes = Number.parseInt(process.env.VERIFIER_DIFF_MAX_BYTES || '', 10);
+  const diffMaxChars = Number.parseInt(process.env.VERIFIER_DIFF_MAX_CHARS || '', 10);
+  const baseSha = pull.base?.sha;
+  const headSha = pull.merge_commit_sha || pull.head?.sha || targetSha;
+  let diffText = fetchLocalGitDiff({
+    baseSha,
+    headSha,
+    maxBytes: Number.isFinite(diffMaxBytes) ? diffMaxBytes : DEFAULT_DIFF_MAX_BYTES,
     core,
-    owner,
-    repo,
-    pullNumber: pull.number,
   });
+  if (!diffText) {
+    diffText = await fetchPullRequestDiff({
+      github,
+      core,
+      owner,
+      repo,
+      pullNumber: pull.number,
+    });
+  }
   const diffSummary = summarizeDiff(diffText, DIFF_SUMMARY_LIMITS);
   content.push('');
   content.push(diffSummary);
+  if (diffText) {
+    content.push('');
+    content.push('## PR Diff (full)');
+    content.push('');
+    content.push('```diff');
+    content.push(formatDiffForContext(diffText, Number.isFinite(diffMaxChars) ? diffMaxChars : DEFAULT_DIFF_MAX_CHARS));
+    content.push('```');
+  }
 
   const markdown = content.join('\n').trimEnd() + '\n';
   const contextPath = path.join(process.cwd(), 'verifier-context.md');
   fs.writeFileSync(contextPath, markdown, 'utf8');
   const diffSummaryPath = path.join(process.cwd(), DEFAULT_DIFF_SUMMARY_PATH);
   fs.writeFileSync(diffSummaryPath, diffSummary + '\n', 'utf8');
+  const diffPath = path.join(process.cwd(), DEFAULT_DIFF_PATH);
+  if (diffText) {
+    fs.writeFileSync(diffPath, diffText + '\n', 'utf8');
+  }
 
   core?.setOutput?.('should_run', 'true');
   core?.setOutput?.('skip_reason', '');
@@ -520,6 +643,8 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
   core?.setOutput?.('acceptance_count', String(acceptanceCount));
   core?.setOutput?.('ci_results', JSON.stringify(ciResults));
   core?.setOutput?.('diff_summary_path', diffSummaryPath);
+  core?.setOutput?.('diff_path', diffText ? diffPath : '');
+  core?.setOutput?.('chain_depth', String(chainDepth));
 
   return {
     shouldRun: true,
@@ -527,13 +652,21 @@ async function buildVerifierContext({ github, context, core, ciWorkflows }) {
     contextPath,
     diffSummary,
     diffSummaryPath,
+    diffPath: diffText ? diffPath : '',
     issueNumbers,
     targetSha,
     acceptanceCount,
     ciResults,
+    chainDepth,
   };
 }
 
 module.exports = {
-  buildVerifierContext,
+  buildVerifierContext: async function ({ github: rawGithub, context, core, ciWorkflows }) {
+    const github = await ensureRateLimitWrapped({ github: rawGithub, core, env: process.env });
+    return buildVerifierContext({ github, context, core, ciWorkflows });
+  },
+  formatDiffForContext,
+  fetchLocalGitDiff,
+  isValidSha,
 };
