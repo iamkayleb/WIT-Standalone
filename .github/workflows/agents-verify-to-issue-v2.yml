@@ -8,7 +8,6 @@ name: Create Issue from Verification (Enhanced)
 # - Background context in collapsible sections
 #
 # Trigger: Add `verify:create-issue` label to a merged PR
-
 on:
   pull_request_target:
     types: [labeled]
@@ -17,19 +16,23 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  models: read
 
 env:
   PYTHON_VERSION: "3.12"
 
 jobs:
   create-issue:
-    if: github.event.label.name == 'verify:create-issue'
+    if: |-
+      vars.USE_CONSOLIDATED_WORKFLOWS != 'true' &&
+      github.event.label.name == 'verify:create-issue'
     runs-on: ubuntu-latest
     steps:
       - name: Check PR is merged
         id: check-merged
         uses: actions/github-script@v8
         with:
+          github-token: ${{ github.token }}
           script: |
             const pr = context.payload.pull_request;
             if (!pr.merged) {
@@ -40,15 +43,51 @@ jobs:
             core.setOutput('pr_number', pr.number);
             core.setOutput('pr_title', pr.title);
 
+      - name: Select GitHub token
+        id: select-token
+        if: steps.check-merged.outputs.merged == 'true'
+        env:
+          CODESPACES_WORKFLOWS: ${{ secrets.CODESPACES_WORKFLOWS }}
+          OWNER_PR_PAT: ${{ secrets.OWNER_PR_PAT }}
+          SERVICE_BOT_PAT: ${{ secrets.SERVICE_BOT_PAT }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$CODESPACES_WORKFLOWS" ]; then
+            echo "token=$CODESPACES_WORKFLOWS" >> "$GITHUB_OUTPUT"
+            echo "source=codespaces" >> "$GITHUB_OUTPUT"
+          elif [ -n "$OWNER_PR_PAT" ]; then
+            echo "token=$OWNER_PR_PAT" >> "$GITHUB_OUTPUT"
+            echo "source=owner-pat" >> "$GITHUB_OUTPUT"
+          elif [ -n "$SERVICE_BOT_PAT" ]; then
+            echo "token=$SERVICE_BOT_PAT" >> "$GITHUB_OUTPUT"
+            echo "source=service-bot" >> "$GITHUB_OUTPUT"
+          else
+            echo "token=$GITHUB_TOKEN" >> "$GITHUB_OUTPUT"
+            echo "source=github-token" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
         if: steps.check-merged.outputs.merged == 'true'
         uses: actions/checkout@v6
         with:
           repository: stranske/Workflows
-          token: ${{ secrets.CODESPACES_WORKFLOWS || github.token }}
+          token: ${{ steps.select-token.outputs.token }}
           sparse-checkout: |
+            .github/actions/setup-api-client
+            .github/agents/registry.yml
+            .github/scripts/agent_registry.js
+            .github/scripts/github-api-with-retry.js
+            .github/scripts/token_load_balancer.js
             scripts/langchain
             tools
+          sparse-checkout-cone-mode: false
+
+      - name: Setup API client
+        uses: ./.github/actions/setup-api-client
+        with:
+          secrets: ${{ toJSON(secrets) }}
+          github_token: ${{ github.token }}
+
 
       - name: Set up Python
         if: steps.check-merged.outputs.merged == 'true'
@@ -59,24 +98,34 @@ jobs:
       - name: Install dependencies
         if: steps.check-merged.outputs.merged == 'true'
         run: |
-          pip install langchain langchain-openai requests
+          pip install langchain langchain-openai langchain-anthropic requests
 
       - name: Collect verification and original issue data
         id: collect
         if: steps.check-merged.outputs.merged == 'true'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ steps.select-token.outputs.token }}
           script: |
             const fs = require('fs');
+            const retryHelperPath = './.github/scripts/github-api-with-retry.js';
+            const retryHelpers = fs.existsSync(retryHelperPath)
+              ? require(retryHelperPath)
+              : {
+                  withRetry: (fn) => fn(),
+                  paginateWithRetry: (githubInstance, method, params) =>
+                    githubInstance.paginate(method, params),
+                };
+            const { withRetry } = retryHelpers;
             const prNumber = context.payload.pull_request.number;
 
             // Get all PR comments
-            const { data: comments } = await github.rest.issues.listComments({
+            const { data: comments } = await withRetry(() => github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
               per_page: 100
-            });
+            }));
 
             // Find verification comment(s) - both evaluate and compare
             const verifyComments = comments.filter(c =>
@@ -126,11 +175,11 @@ jobs:
             if (linkedIssueNumber) {
               core.info(`Found linked issue #${linkedIssueNumber}`);
               try {
-                const { data: issue } = await github.rest.issues.get({
+                const { data: issue } = await withRetry(() => github.rest.issues.get({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: linkedIssueNumber
-                });
+                }));
                 originalIssueBody = issue.body || '';
                 originalIssueTitle = issue.title || '';
                 core.setOutput('original_issue_number', linkedIssueNumber);
@@ -152,7 +201,8 @@ jobs:
         if: steps.check-merged.outputs.merged == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLAUDE_API_STRANSKE: ${{ secrets.CLAUDE_API_STRANSKE }}
+          GITHUB_TOKEN: ${{ steps.select-token.outputs.token }}
           ORIGINAL_ISSUE_NUMBER: ${{ steps.collect.outputs.original_issue_number }}
           ORIGINAL_ISSUE_TITLE: ${{ steps.collect.outputs.original_issue_title }}
           PR_NUMBER: ${{ steps.check-merged.outputs.pr_number }}
@@ -182,6 +232,7 @@ jobs:
         if: steps.generate.outcome == 'failure' && steps.check-merged.outputs.merged == 'true'
         uses: actions/github-script@v8
         with:
+          github-token: ${{ steps.select-token.outputs.token }}
           script: |
             // Fallback to original simple extraction if Python script fails
             const fs = require('fs');
@@ -271,7 +322,36 @@ jobs:
             ${{ steps.generate.outputs.issue_body ||
             steps.fallback.outputs.issue_body }}
         with:
+          github-token: ${{ steps.select-token.outputs.token }}
           script: |
+            const fs = require('fs');
+            const retryHelperPath = './.github/scripts/github-api-with-retry.js';
+            const retryHelpers = fs.existsSync(retryHelperPath)
+              ? require(retryHelperPath)
+              : {
+                  withRetry: (fn) => fn(),
+                  paginateWithRetry: (githubInstance, method, params) =>
+                    githubInstance.paginate(method, params),
+                };
+            const { withRetry } = retryHelpers;
+
+            let agentKey = 'codex';
+            try {
+              const { resolveAgentFromLabels } = require('./.github/scripts/agent_registry.js');
+              const prLabels = context.payload.pull_request?.labels || [];
+              agentKey = resolveAgentFromLabels(prLabels, {
+                registryPath: './.github/agents/registry.yml',
+              });
+            } catch (err) {
+              core.warning(
+                `Failed to resolve agent from PR labels; defaulting to codex: ${err.message}`
+              );
+              agentKey = 'codex';
+            }
+            const normalized = String(agentKey || 'codex').trim().toLowerCase() || 'codex';
+            const agentLabel = `agent:${normalized}`;
+            const fromLabel = `from:${normalized}`;
+
             const title = process.env.ISSUE_TITLE;
             const body = process.env.ISSUE_BODY;
 
@@ -280,13 +360,13 @@ jobs:
               return;
             }
 
-            const issue = await github.rest.issues.create({
+            const issue = await withRetry(() => github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: title,
               body: body,
-              labels: ['follow-up', 'agents:optimize']
-            });
+              labels: ['follow-up', agentLabel, fromLabel, 'agents:optimize']
+            }));
 
             core.info(`Created issue #${issue.data.number}`);
             core.setOutput('issue_number', issue.data.number);
@@ -299,7 +379,19 @@ jobs:
           ISSUE_NUMBER: ${{ steps.create-issue.outputs.issue_number }}
           ISSUE_URL: ${{ steps.create-issue.outputs.issue_url }}
         with:
+          github-token: ${{ steps.select-token.outputs.token }}
           script: |
+            const fs = require('fs');
+            const retryHelperPath = './.github/scripts/github-api-with-retry.js';
+            const retryHelpers = fs.existsSync(retryHelperPath)
+              ? require(retryHelperPath)
+              : {
+                  withRetry: (fn) => fn(),
+                  paginateWithRetry: (githubInstance, method, params) =>
+                    githubInstance.paginate(method, params),
+                };
+            const { withRetry } = retryHelpers;
+
             const issueNumber = process.env.ISSUE_NUMBER;
             const issueUrl = process.env.ISSUE_URL;
 
@@ -311,31 +403,43 @@ jobs:
               '**Next steps:**',
               '1. Review the generated issue',
               '2. Add `agents:apply-suggestions` label to format for agent work',
-              '3. Add `agent:codex` label to assign to an agent',
+              '3. Add an `agent:*` label (e.g., `agent:codex`) to assign to an agent',
               '',
               '> Or work on it manually - the choice is yours!'
             ].join('\n');
 
-            await github.rest.issues.createComment({
+            await withRetry(() => github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.pull_request.number,
               body: body
-            });
+            }));
 
       - name: Remove trigger label
         if: steps.check-merged.outputs.merged == 'true'
         uses: actions/github-script@v8
         continue-on-error: true
         with:
+          github-token: ${{ steps.select-token.outputs.token }}
           script: |
+            const fs = require('fs');
+            const retryHelperPath = './.github/scripts/github-api-with-retry.js';
+            const retryHelpers = fs.existsSync(retryHelperPath)
+              ? require(retryHelperPath)
+              : {
+                  withRetry: (fn) => fn(),
+                  paginateWithRetry: (githubInstance, method, params) =>
+                    githubInstance.paginate(method, params),
+                };
+            const { withRetry } = retryHelpers;
+
             try {
-              await github.rest.issues.removeLabel({
+              await withRetry(() => github.rest.issues.removeLabel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.payload.pull_request.number,
                 name: 'verify:create-issue'
-              });
+              }));
               core.info('Removed verify:create-issue label');
             } catch (error) {
               core.warning('Could not remove label: ' + error.message);
