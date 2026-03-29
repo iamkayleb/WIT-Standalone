@@ -47,16 +47,21 @@ concurrency:
   group: >-
     ${{ github.event_name == 'issue_comment' &&
         format('agents-pr-meta-comment-{0}', github.event.comment.id) ||
+        github.event_name == 'pull_request' &&
+        format('agents-pr-meta-pr-{0}', github.event.pull_request.number) ||
         format('agents-pr-meta-run-{0}', github.run_id) }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Resolve PR context for issue_comment events
   resolve_pr:
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+    if: |
+      vars.USE_CONSOLIDATED_WORKFLOWS != 'true' &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request
     runs-on: ubuntu-latest
     outputs:
-      pr_number: ${{ fromJSON(steps.resolve.outputs.pr_number ) }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
       comment_id: ${{ steps.resolve.outputs.comment_id }}
       comment_body: ${{ steps.resolve.outputs.comment_body }}
     steps:
@@ -77,10 +82,13 @@ jobs:
   # Call reusable PR meta workflow for comment events
   pr_meta_comment:
     needs: resolve_pr
-    if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+    if: |
+      vars.USE_CONSOLIDATED_WORKFLOWS != 'true' &&
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request
     uses: stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
     with:
-      pr_number: ${{fromJSON(needs.resolve_pr.outputs.pr_number)}}
+      pr_number: ${{ fromJSON(needs.resolve_pr.outputs.pr_number) }}
       comment_id: ${{ needs.resolve_pr.outputs.comment_id }}
       comment_body: ${{ needs.resolve_pr.outputs.comment_body }}
       event_name: 'issue_comment'
@@ -91,7 +99,7 @@ jobs:
 
   # Call reusable PR meta workflow for PR events
   pr_meta_pr:
-    if: github.event_name == 'pull_request'
+    if: vars.USE_CONSOLIDATED_WORKFLOWS != 'true' && github.event_name == 'pull_request'
     uses: stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml@main
     with:
       pr_number: ${{ github.event.pull_request.number }}
@@ -101,7 +109,7 @@ jobs:
 
   # Resolve PR context for workflow_run events (Gate completion)
   resolve_pr_from_workflow_run:
-    if: github.event_name == 'workflow_run'
+    if: vars.USE_CONSOLIDATED_WORKFLOWS != 'true' && github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
     outputs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -126,6 +134,7 @@ jobs:
   pr_meta_workflow_run:
     needs: resolve_pr_from_workflow_run
     if: |
+      vars.USE_CONSOLIDATED_WORKFLOWS != 'true' &&
       github.event_name == 'workflow_run' &&
       needs.resolve_pr_from_workflow_run.outputs.should_run == 'true'
     uses: stranske/Workflows/.github/workflows/reusable-20-pr-meta.yml@main

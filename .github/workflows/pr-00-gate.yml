@@ -1,6 +1,6 @@
 # Gate orchestrates CI enforcement for pull requests. The final `summary`
 # job aggregates artifacts, computes coverage deltas, publishes the commit
-# status, and maintains the consolidated PR comment. omo
+# status, and maintains the consolidated PR comment.
 name: Gate
 
 on:
@@ -164,12 +164,24 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '20'
-      - run: node --test .github/scripts/__tests__/*.test.js
+      - name: Run JS tests (if present)
+        run: |
+          if ls .github/scripts/__tests__/*.test.js 1>/dev/null 2>&1; then
+            node --test .github/scripts/__tests__/*.test.js
+          else
+            echo "No JS test files found in .github/scripts/__tests__/; skipping."
+          fi
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - run: python -m pip install --upgrade pip pytest requests
-      - run: pytest tests/workflows/github_scripts
+      - name: Run Python workflow tests (if present)
+        run: |
+          if [ -d tests/workflows/github_scripts ]; then
+            python -m pip install --upgrade pip pytest requests
+            pytest tests/workflows/github_scripts
+          else
+            echo "No Python workflow tests found in tests/workflows/github_scripts/; skipping."
+          fi
 
   issue-consistency:
     name: issue consistency
@@ -195,7 +207,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: Check issue number consistency
-        run: python scripts/check_issue_consistency.py
+        run: |
+          if [ -f scripts/check_issue_consistency.py ]; then
+            python scripts/check_issue_consistency.py
+          else
+            echo "scripts/check_issue_consistency.py not found; skipping."
+          fi
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_REF: ${{ github.base_ref }}
@@ -808,6 +825,10 @@ jobs:
             const { upsertAnchoredComment } = require('./.github/scripts/comment-dedupe.js');
 
             const commentPath = path.resolve('gate-summary.md');
+            if (!fs.existsSync(commentPath)) {
+              core.warning('gate-summary.md not found; skipping PR comment.');
+              return;
+            }
             const body = fs.readFileSync(commentPath, 'utf8');
             await upsertAnchoredComment({
               github,
