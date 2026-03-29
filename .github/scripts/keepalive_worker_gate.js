@@ -2,6 +2,7 @@
 
 const { detectKeepalive } = require('./agents_pr_meta_keepalive.js');
 const { loadKeepaliveState } = require('./keepalive_state.js');
+const { ensureRateLimitWrapped } = require('./github-rate-limited-wrapper.js');
 
 function normalise(value) {
   return String(value ?? '').trim();
@@ -107,6 +108,7 @@ async function detectInstructionComment({ github, context, comment, prNumber, en
 
   const detectionEnv = {
     ALLOWED_LOGINS: normalise(env.ALLOWED_LOGINS) || 'stranske',
+    // API contract: marker string must match what keepalive_contract.js emits
     KEEPALIVE_MARKER: normalise(env.KEEPALIVE_MARKER) || '<!-- codex-keepalive-marker -->',
     GATE_OK: 'true',
     GATE_REASON: '',
@@ -333,5 +335,8 @@ async function evaluateKeepaliveWorkerGate({ core, github, context, env = proces
 }
 
 module.exports = {
-  evaluateKeepaliveWorkerGate,
+  evaluateKeepaliveWorkerGate: async function ({ core, github: rawGithub, context, env = process.env }) {
+    const github = await ensureRateLimitWrapped({ github: rawGithub, core, env });
+    return evaluateKeepaliveWorkerGate({ core, github, context, env });
+  },
 };

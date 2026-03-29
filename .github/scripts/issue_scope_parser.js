@@ -11,6 +11,11 @@ const stripBlockquotePrefixes = (value) =>
 const isCodeFenceLine = (line) => /^(`{3,}|~{3,})/.test(line.trim());
 
 const LIST_ITEM_REGEX = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+const DETAILS_OPEN_REGEX = /^<details\b[^>]*>\s*$/i;
+const DETAILS_CLOSE_REGEX = /^<\/details>\s*$/i;
+const SUMMARY_OPEN_REGEX = /^<summary\b[^>]*>\s*$/i;
+const SUMMARY_CLOSE_REGEX = /^<\/summary>\s*$/i;
+const SUMMARY_INLINE_REGEX = /^<summary\b[^>]*>.*<\/summary>\s*$/i;
 
 const SECTION_DEFS = [
   { key: 'scope', label: 'Scope', aliases: ['Scope', 'Issue Scope', 'Why', 'Background', 'Context', 'Overview'], optional: true },
@@ -46,7 +51,8 @@ const CHECKBOX_SECTIONS = new Set(['tasks', 'acceptance']);
 const ACCEPTANCE_CUE_REGEX = /(acceptance|definition of done|done criteria)/i;
 
 function normaliseSectionContent(sectionKey, content) {
-  const trimmed = String(content || '').trim();
+  const cleaned = stripDetailsTags(content);
+  const trimmed = String(cleaned || '').trim();
   if (!trimmed) {
     return '';
   }
@@ -123,6 +129,61 @@ function normaliseChecklist(content) {
   });
 
   return mutated ? updated.join('\n') : raw;
+}
+
+function stripDetailsTags(content) {
+  const raw = String(content || '');
+  if (!raw.trim()) {
+    return raw;
+  }
+
+  const lines = raw.split('\n');
+  const cleaned = [];
+  let insideCodeBlock = false;
+  let insideSummary = false;
+
+  for (const line of lines) {
+    if (isCodeFenceLine(line)) {
+      insideCodeBlock = !insideCodeBlock;
+      cleaned.push(line);
+      continue;
+    }
+
+    if (insideCodeBlock) {
+      cleaned.push(line);
+      continue;
+    }
+
+    const trimmed = line.trim();
+    const listMatch = trimmed ? line.match(LIST_ITEM_REGEX) : null;
+    const candidate = listMatch ? listMatch[3].trim() : trimmed;
+    const summaryCandidate = candidate.replace(/^\[[ xX]\]\s*/, '').trim();
+
+    if (insideSummary) {
+      if (SUMMARY_CLOSE_REGEX.test(summaryCandidate) || SUMMARY_CLOSE_REGEX.test(candidate)) {
+        insideSummary = false;
+      }
+      continue;
+    }
+
+    if (SUMMARY_INLINE_REGEX.test(summaryCandidate) || SUMMARY_INLINE_REGEX.test(candidate)) {
+      continue;
+    }
+    if (SUMMARY_OPEN_REGEX.test(summaryCandidate) || SUMMARY_OPEN_REGEX.test(candidate)) {
+      insideSummary = true;
+      continue;
+    }
+    if (SUMMARY_CLOSE_REGEX.test(summaryCandidate) || SUMMARY_CLOSE_REGEX.test(candidate)) {
+      continue;
+    }
+    if (DETAILS_OPEN_REGEX.test(candidate) || DETAILS_CLOSE_REGEX.test(candidate)) {
+      continue;
+    }
+
+    cleaned.push(line);
+  }
+
+  return cleaned.join('\n');
 }
 
 function stripHeadingMarkers(rawLine) {
@@ -524,19 +585,21 @@ function collectSections(source) {
       continue; // Skip missing sections instead of failing
     }
     // Find the boundary for this section's content:
-    // 1. Next heading at SAME LEVEL or HIGHER (allows subsections to be included)
+    // 1. Next heading at the SAME level (e.g., another ## for a ## section)
+    //    This catches structural headings that divide the document at the
+    //    same depth, while allowing subsection headers at different levels
+    //    (e.g., ### Phase 1 inside #### Tasks) to remain as content.
     // 2. OR next recognized section heading (even if it's a subsection level)
     //    Example: ## Scope followed by ### Tasks should stop at ### Tasks
-    const headingIndexSet = new Set(headings.map(h => h.index));
-    const nextSameLevelOrHigher = allHeadings
-      .filter((entry) => entry.index > header.index && entry.level <= header.level)
+    const nextSameLevel = allHeadings
+      .filter((entry) => entry.index > header.index && entry.level === header.level)
       .sort((a, b) => a.index - b.index)[0];
     const nextRecognizedSection = headings
       .filter((entry) => entry.index > header.index && entry.title !== header.title)
       .sort((a, b) => a.index - b.index)[0];
     
     // Use whichever boundary comes first
-    const boundaries = [nextSameLevelOrHigher, nextRecognizedSection].filter(Boolean);
+    const boundaries = [nextSameLevel, nextRecognizedSection].filter(Boolean);
     const nextHeader = boundaries.length > 0 
       ? boundaries.sort((a, b) => a.index - b.index)[0]
       : null;
@@ -606,7 +669,7 @@ const extractScopeTasksAcceptanceSections = (source, options = {}) => {
     const canonicalTitle = section.label;
     const headingLabel = resolveHeadingLabel(section.key, labels?.[section.key], canonicalTitle);
     const content = (sections[section.key] || '').trim();
-    let body = content;
+    let body = content ? stripDetailsTags(content) : content;
     if (!body && includePlaceholders) {
       body = PLACEHOLDERS[section.key] || '';
     }
