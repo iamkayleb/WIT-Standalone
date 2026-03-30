@@ -1,5 +1,7 @@
 'use strict';
 
+const { ensureRateLimitWrapped } = require('./github-rate-limited-wrapper.js');
+
 const STATE_MARKER = 'keepalive-state';
 const STATE_VERSION = 'v1';
 const STATE_REGEX = /<!--\s*keepalive-state(?::([\w.-]+))?\s+(.*?)\s*-->/s;
@@ -136,6 +138,56 @@ function parseStateComment(body) {
   return { version, data: {} };
 }
 
+function hasFiniteNumericValue(value) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return false;
+  }
+  return Number.isFinite(Number(value));
+}
+
+function isLoopState(data) {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  if (hasFiniteNumericValue(data.iteration) || hasFiniteNumericValue(data.max_iterations)) {
+    return true;
+  }
+  if (data.tasks && typeof data.tasks === 'object') {
+    if (hasFiniteNumericValue(data.tasks.total) || hasFiniteNumericValue(data.tasks.unchecked)) {
+      return true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'keepalive_enabled')) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'autofix_enabled')) {
+    return true;
+  }
+  if (Object.prototype.hasOwnProperty.call(data, 'running')) {
+    return true;
+  }
+  if (data.verification && typeof data.verification === 'object') {
+    return true;
+  }
+  if (data.last_instruction && typeof data.last_instruction === 'object') {
+    return true;
+  }
+  // Delegation state fields (agent:auto mode)
+  if (data.current_agent && typeof data.current_agent === 'string') {
+    return true;
+  }
+  if (Array.isArray(data.delegation_log) && data.delegation_log.length > 0) {
+    return true;
+  }
+  if (Array.isArray(data.effectiveness_history) && data.effectiveness_history.length > 0) {
+    return true;
+  }
+  return false;
+}
+
 function formatStateComment(data) {
   const payload = data && typeof data === 'object' ? { ...data } : {};
   const version = normalise(payload.version) || STATE_VERSION;
@@ -186,6 +238,7 @@ async function findStateComment({ github, owner, repo, prNumber, trace }) {
     return null;
   }
   const traceNorm = normaliseLower(trace);
+  let fallback = null;
   for (let index = comments.length - 1; index >= 0; index -= 1) {
     const comment = comments[index];
     const parsed = parseStateComment(comment?.body);
@@ -198,6 +251,15 @@ async function findStateComment({ github, owner, repo, prNumber, trace }) {
       if (candidateTrace !== traceNorm) {
         continue;
       }
+    } else if (!isLoopState(candidate)) {
+      if (!fallback) {
+        fallback = {
+          comment,
+          state: candidate,
+          version: parsed.version,
+        };
+      }
+      continue;
     }
     return {
       comment,
@@ -205,10 +267,19 @@ async function findStateComment({ github, owner, repo, prNumber, trace }) {
       version: parsed.version,
     };
   }
-  return null;
+  return fallback;
 }
 
-async function createKeepaliveStateManager({ github, context, prNumber, trace, round }) {
+async function createKeepaliveStateManager({ github: rawGithub, context, prNumber, trace, round }) {
+  // Wrap github client with rate-limit-aware retry
+  let github;
+  try {
+    github = await ensureRateLimitWrapped({ github: rawGithub, env: process.env });
+  } catch (error) {
+    console.warn(`Failed to wrap GitHub client: ${error.message} - using raw client`);
+    github = rawGithub;
+  }
+
   const owner = context?.repo?.owner;
   const repo = context?.repo?.repo;
   if (!owner || !repo || !Number.isFinite(prNumber) || prNumber <= 0) {
@@ -297,12 +368,30 @@ async function createKeepaliveStateManager({ github, context, prNumber, trace, r
   };
 }
 
-async function saveKeepaliveState({ github, context, prNumber, trace, round, updates }) {
+async function saveKeepaliveState({ github: rawGithub, context, prNumber, trace, round, updates }) {
+  // Wrap github client with rate-limit-aware retry
+  let github;
+  try {
+    github = await ensureRateLimitWrapped({ github: rawGithub, env: process.env });
+  } catch (error) {
+    console.warn(`Failed to wrap GitHub client: ${error.message} - using raw client`);
+    github = rawGithub;
+  }
+
   const manager = await createKeepaliveStateManager({ github, context, prNumber, trace, round });
   return manager.save(updates);
 }
 
-async function loadKeepaliveState({ github, context, prNumber, trace }) {
+async function loadKeepaliveState({ github: rawGithub, context, prNumber, trace }) {
+  // Wrap github client with rate-limit-aware retry
+  let github;
+  try {
+    github = await ensureRateLimitWrapped({ github: rawGithub, env: process.env });
+  } catch (error) {
+    console.warn(`Failed to wrap GitHub client: ${error.message} - using raw client`);
+    github = rawGithub;
+  }
+
   const owner = context?.repo?.owner;
   const repo = context?.repo?.repo;
   if (!owner || !repo || !Number.isFinite(prNumber) || prNumber <= 0) {
@@ -321,7 +410,16 @@ async function loadKeepaliveState({ github, context, prNumber, trace }) {
   };
 }
 
-async function resetState({ github, context, prNumber, trace, round }) {
+async function resetState({ github: rawGithub, context, prNumber, trace, round }) {
+  // Wrap github client with rate-limit-aware retry
+  let github;
+  try {
+    github = await ensureRateLimitWrapped({ github: rawGithub, env: process.env });
+  } catch (error) {
+    console.warn(`Failed to wrap GitHub client: ${error.message} - using raw client`);
+    github = rawGithub;
+  }
+
   const startTime = Date.now();
   const timestamp = new Date(startTime).toISOString();
   const issueNumber = Number.isFinite(prNumber) ? String(prNumber) : normalise(prNumber);

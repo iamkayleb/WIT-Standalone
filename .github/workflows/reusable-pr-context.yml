@@ -135,7 +135,7 @@ jobs:
 
     steps:
       - name: Checkout (for scripts)
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           sparse-checkout: |
             .github/scripts
@@ -145,7 +145,7 @@ jobs:
         id: app_token
         # Use continue-on-error to handle missing secrets gracefully
         continue-on-error: true
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
         with:
           app-id: ${{ secrets.WORKFLOWS_APP_ID }}
           private-key: ${{ secrets.WORKFLOWS_APP_PRIVATE_KEY }}
@@ -170,22 +170,24 @@ jobs:
 
       - name: Fetch PR Context via GraphQL
         id: context
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ steps.token.outputs.token }}
           script: |
-            const { fetchPRContext, serializeForOutput } = require('./.github/scripts/pr-context-graphql.js');
-            
+            const { fetchPRContext, serializeForOutput } = require(
+              './.github/scripts/pr-context-graphql.js'
+            );
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const prNumber = ${{ inputs.pr_number }};
-            
+
             console.log(`Fetching PR context for ${owner}/${repo}#${prNumber}`);
             console.log(`Token source: ${{ steps.token.outputs.source }}`);
-            
+
             try {
               const pr = await fetchPRContext(github, owner, repo, prNumber);
-              
+
               // Core outputs
               core.setOutput('pr_number', pr.number);
               core.setOutput('pr_title', pr.title);
@@ -198,28 +200,37 @@ jobs:
               core.setOutput('head_ref', pr.headRef);
               core.setOutput('base_ref', pr.baseRef);
               core.setOutput('head_sha', pr.headSha);
-              
+
               // Labels
               core.setOutput('labels_json', JSON.stringify(pr.labels));
-              core.setOutput('has_agent_label', pr.hasAnyLabel(['agent:codex', 'agent:copilot', 'agents:keepalive']));
+              core.setOutput(
+                'has_agent_label',
+                pr.hasAnyLabel(['agent:codex', 'agent:copilot', 'agents:keepalive'])
+              );
               core.setOutput('has_keepalive_label', pr.hasLabel('agents:keepalive'));
-              
+
               // Files
               core.setOutput('files_count', pr.files.total);
               core.setOutput('files_json', JSON.stringify(pr.files.paths));
               core.setOutput('has_src_changes', pr.files.paths.some(f => f.startsWith('src/')));
-              core.setOutput('has_test_changes', pr.files.paths.some(f => f.includes('test') || f.includes('spec')));
-              core.setOutput('has_workflow_changes', pr.files.paths.some(f => f.startsWith('.github/workflows/')));
-              
+              core.setOutput(
+                'has_test_changes',
+                pr.files.paths.some((f) => f.includes('test') || f.includes('spec'))
+              );
+              core.setOutput(
+                'has_workflow_changes',
+                pr.files.paths.some((f) => f.startsWith('.github/workflows/'))
+              );
+
               // CI Status
               core.setOutput('ci_status', pr.lastCommit?.status || 'UNKNOWN');
               core.setOutput('checks_json', JSON.stringify(pr.lastCommit?.checks || []));
-              
+
               // Full context (for complex processing)
               core.setOutput('full_context_json', serializeForOutput(pr));
-              
+
               console.log(`✅ Fetched context: ${pr.labels.length} labels, ${pr.files.total} files`);
-              
+
             } catch (error) {
               core.setFailed(`Failed to fetch PR context: ${error.message}`);
             }
