@@ -10,6 +10,7 @@ on:
 permissions:
   contents: read
   issues: write
+  models: read
 
 env:
   # Threshold for auto-applying labels (very high confidence)
@@ -26,14 +27,22 @@ jobs:
       !contains(github.event.issue.labels.*.name, 'agents:formatted') &&
       !contains(github.event.issue.labels.*.name, 'agents:autofix') &&
       !contains(github.event.issue.labels.*.name, 'agent:codex') &&
+      !contains(github.event.issue.labels.*.name, 'agent:claude') &&
+      !contains(github.event.issue.labels.*.name, 'agent:auto') &&
       !contains(github.event.issue.labels.*.name, 'automated')
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup API client
+        uses: ./.github/actions/setup-api-client
+        with:
+          secrets: ${{ toJSON(secrets) }}
+          github_token: ${{ github.token }}
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
 
@@ -43,11 +52,20 @@ jobs:
 
       - name: Get repo labels
         id: get-labels
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
+            const { createTokenAwareRetry } = require('./.github/scripts/github-api-with-retry.js');
+            const { paginateWithRetry } = await createTokenAwareRetry({
+              github,
+              core,
+              env: process.env,
+              task: 'agents-auto-label',
+              capabilities: ['issues:read'],
+            });
+
             // Paginate to get all labels (handles repos with >100 labels)
-            const labels = await github.paginate(
+            const labels = await paginateWithRetry(
               github.rest.issues.listLabelsForRepo,
               {
                 owner: context.repo.owner,
@@ -69,6 +87,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CLAUDE_API_STRANSKE: ${{ secrets.CLAUDE_API_STRANSKE }}
           LABELS_JSON: ${{ steps.get-labels.outputs.labels_json }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
@@ -168,9 +187,17 @@ jobs:
         if: |
           steps.match.outputs.has_suggestions == 'true' &&
           steps.match.outputs.auto_apply_labels != '[]'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
+            const { createTokenAwareRetry } = require('./.github/scripts/github-api-with-retry.js');
+            const { withRetry } = await createTokenAwareRetry({
+              github,
+              core,
+              env: process.env,
+              task: 'agents-auto-label',
+              capabilities: ['issues:read', 'issues:write'],
+            });
             const autoApplyLabels = JSON.parse('${{ steps.match.outputs.auto_apply_labels }}');
 
             if (autoApplyLabels.length === 0) {
@@ -179,11 +206,11 @@ jobs:
             }
 
             // Get current labels
-            const { data: issue } = await github.rest.issues.get({
+            const { data: issue } = await withRetry((client) => client.rest.issues.get({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number
-            });
+            }));
 
             const currentLabels = issue.labels.map(l => l.name);
             const newLabels = autoApplyLabels.filter(l => !currentLabels.includes(l));
@@ -194,12 +221,12 @@ jobs:
             }
 
             // Add labels
-            await github.rest.issues.addLabels({
+            await withRetry((client) => client.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
               labels: newLabels
-            });
+            }));
 
             core.info(`Applied labels: ${newLabels.join(', ')}`);
 
@@ -207,9 +234,17 @@ jobs:
         if: |
           steps.match.outputs.has_suggestions == 'true' &&
           steps.match.outputs.suggested_labels != '[]'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
+            const { createTokenAwareRetry } = require('./.github/scripts/github-api-with-retry.js');
+            const { withRetry, paginateWithRetry } = await createTokenAwareRetry({
+              github,
+              core,
+              env: process.env,
+              task: 'agents-auto-label',
+              capabilities: ['issues:read', 'issues:write'],
+            });
             const suggestedLabels = JSON.parse('${{ steps.match.outputs.suggested_labels }}');
             const autoApplied = JSON.parse('${{ steps.match.outputs.auto_apply_labels }}');
 
@@ -240,12 +275,15 @@ jobs:
             body += `---\n*Auto-generated by label matcher*`;
 
             // Check for existing suggestion comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 30
-            });
+            const comments = await paginateWithRetry(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                per_page: 30
+              }
+            );
 
             const existingComment = comments.find(c =>
               c.body.includes('### 🏷️ Label Suggestions') &&
@@ -254,20 +292,20 @@ jobs:
 
             if (existingComment) {
               // Update existing comment
-              await github.rest.issues.updateComment({
+              await withRetry((client) => client.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 comment_id: existingComment.id,
                 body: body
-              });
+              }));
               core.info('Updated existing suggestion comment');
             } else {
               // Create new comment
-              await github.rest.issues.createComment({
+              await withRetry((client) => client.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
                 body: body
-              });
+              }));
               core.info('Posted label suggestions');
             }

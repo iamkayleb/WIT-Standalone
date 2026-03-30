@@ -1,5 +1,5 @@
-# Automates selection of ready agent issues and primes a branch
-# before handing control to the belt worker.
+# Automates selection of ready Codex issues and primes a codex/issue-<n> branch
+# before handing control to the Codex belt worker.
 name: Agents 71 Codex Belt Dispatcher
 
 on:
@@ -70,12 +70,12 @@ permissions:
   actions: write
 
 concurrency:
-  group: belt-dispatcher-${{ inputs.agent_key || 'codex' }}
+  group: codex-belt-dispatcher
   cancel-in-progress: false
 
 jobs:
   dispatch:
-    name: Select next agent issue
+    name: Select next Codex issue
     runs-on: ubuntu-latest
     outputs:
       agent_key: ${{ steps.pick.outputs.agent_key || '' }}
@@ -92,7 +92,7 @@ jobs:
       - name: Mint GitHub App token (preferred)
         id: app_token
         if: ${{ env.WORKFLOWS_APP_ID != '' && env.WORKFLOWS_APP_PRIVATE_KEY != '' }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
         with:
           app-id: ${{ env.WORKFLOWS_APP_ID }}
           private-key: ${{ env.WORKFLOWS_APP_PRIVATE_KEY }}
@@ -167,7 +167,7 @@ jobs:
           echo "dry_run=${{ inputs.dry_run }}" >>"$GITHUB_OUTPUT"
 
       - name: Checkout repo (for retry helpers)
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           token: ${{ env.GH_DISPATCH_TOKEN }}
           fetch-depth: 1
@@ -176,11 +176,11 @@ jobs:
         uses: ./.github/actions/setup-api-client
         with:
           secrets: ${{ toJSON(secrets) }}
-          github_token: ${{ github.token }}
+          github_token: ${{ env.GH_DISPATCH_TOKEN || github.token }}
 
       - name: Resolve Workflows default branch
         id: workflows_ref
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const { createTokenAwareRetry } = require('./.github/scripts/github-api-with-retry.js');
@@ -198,7 +198,7 @@ jobs:
             core.setOutput('ref', data.default_branch);
 
       - name: Checkout (for retry helpers)
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           repository: stranske/Workflows
           ref: ${{ steps.workflows_ref.outputs.ref }}
@@ -212,7 +212,7 @@ jobs:
 
       - name: Resolve candidate issue
         id: pick
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_DISPATCH_TOKEN }}
           script: |
@@ -220,7 +220,7 @@ jobs:
             const { withRetry } = await createTokenAwareRetry({
               github,
               core,
-              task: 'belt-dispatcher-pick',
+              task: 'codex-belt-dispatcher-pick',
             });
             const forced = '${{ inputs.force_issue }}';
             const agentKey = String('${{ inputs.agent_key }}' || 'codex').trim().toLowerCase() || 'codex';
@@ -307,13 +307,13 @@ jobs:
 
       - name: Checkout default branch
         if: ${{ steps.pick.outputs.issue != '' && steps.mode.outputs.dry_run != 'true' }}
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ steps.pick.outputs.base }}
           token: ${{ env.GH_DISPATCH_TOKEN }}
           fetch-depth: 0
 
-      - name: Create agent branch if missing
+      - name: Create codex branch if missing
         if: ${{ steps.pick.outputs.issue != '' && steps.mode.outputs.dry_run != 'true' }}
         run: |
           set -euo pipefail
@@ -334,7 +334,7 @@ jobs:
 
       - name: Transition issue to in-progress
         if: ${{ steps.pick.outputs.issue != '' && steps.mode.outputs.dry_run != 'true' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_DISPATCH_TOKEN }}
           script: |
@@ -342,7 +342,7 @@ jobs:
             const { withRetry } = await createTokenAwareRetry({
               github,
               core,
-              task: 'belt-dispatcher-transition',
+              task: 'codex-belt-dispatcher-transition',
             });
             const issue = Number('${{ steps.pick.outputs.issue }}');
             if (!issue) { return; }
@@ -365,7 +365,7 @@ jobs:
                 owner,
                 repo,
                 issue_number: issue,
-                body: `Belt dispatcher queued this issue and created branch \`${branch}\`.`
+                body: `Codex belt dispatcher queued this issue and created branch \`${branch}\`.`
               }));
             } catch (error) {
               core.warning(`Failed to comment on issue #${issue}: ${error.message}`);
