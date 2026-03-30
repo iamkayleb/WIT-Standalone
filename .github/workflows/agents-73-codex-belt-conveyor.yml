@@ -1,4 +1,4 @@
-# Closes the loop: merge successful belt PRs, tidy branches and issues,
+# Closes the loop: merge successful Codex belt PRs, tidy branches and issues,
 # and immediately nudge the dispatcher for the next item in the queue.
 name: Agents 73 Codex Belt Conveyor
 
@@ -45,6 +45,7 @@ permissions:
   pull-requests: write
   issues: write
   actions: write
+
 jobs:
   normalize:
     name: Normalize agent inputs
@@ -66,7 +67,7 @@ jobs:
 
   promote:
     needs: normalize
-    name: Promote merged belt PR
+    name: Promote merged Codex belt PR
     runs-on: ubuntu-latest
     concurrency:
       group: >-
@@ -94,7 +95,7 @@ jobs:
       - name: Mint GitHub App token (preferred)
         id: app_token
         if: ${{ env.WORKFLOWS_APP_ID != '' && env.WORKFLOWS_APP_PRIVATE_KEY != '' }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2
         with:
           app-id: ${{ env.WORKFLOWS_APP_ID }}
           private-key: ${{ env.WORKFLOWS_APP_PRIVATE_KEY }}
@@ -183,7 +184,7 @@ jobs:
           } >>"$GITHUB_OUTPUT"
 
       - name: Checkout retry helpers
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           sparse-checkout: |
             .github/actions/setup-api-client
@@ -203,7 +204,7 @@ jobs:
 
       - name: Summarise invocation
         id: summary
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const summary = core.summary;
@@ -267,7 +268,7 @@ jobs:
 
       - name: Load PR details
         id: pr
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -328,7 +329,7 @@ jobs:
 
       - name: Ensure Gate succeeded
         id: gate
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -357,7 +358,7 @@ jobs:
 
       - name: Detect bootstrap-only placeholder change
         id: bootstrap
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -383,8 +384,8 @@ jobs:
             });
 
             const placeholderPattern = inferredIssue
-              ? new RegExp(`^agents/[a-z]+-${inferredIssue}\\.md$`)
-              : /^agents\/[a-z]+-\d+\.md$/;
+              ? new RegExp(`^agents/codex-${inferredIssue}\\.md$`)
+              : /^agents\/codex-\d+\.md$/;
 
             let bootstrapOnly = files.length > 0;
             for (const file of files) {
@@ -413,7 +414,7 @@ jobs:
                 break;
               }
               const expectedLine = inferredIssue
-                ? `<!-- bootstrap for ${agentKey} on issue #${inferredIssue} -->`
+                ? `<!-- bootstrap for codex on issue #${inferredIssue} -->`
                 : null;
               if (expectedLine && addedLines[0] !== expectedLine) {
                 bootstrapOnly = false;
@@ -423,7 +424,7 @@ jobs:
 
             const summary = core.summary;
             if (bootstrapOnly) {
-              summary.addRaw('Detected bootstrap-only agent PR; merge deferred until real changes are present.').addEOL();
+              summary.addRaw('Detected bootstrap-only Codex PR; merge deferred until real changes are present.').addEOL();
             }
             await summary.write();
 
@@ -432,7 +433,7 @@ jobs:
       - name: Merge PR with squash
         if: ${{ steps.mode.outputs.dry_run != 'true' && steps.bootstrap.outputs.bootstrap != 'true' }}
         id: merge
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -457,7 +458,7 @@ jobs:
 
       - name: Delete branch after merge
         if: ${{ steps.mode.outputs.dry_run != 'true' && steps.bootstrap.outputs.bootstrap != 'true' && steps.merge.outputs.merged == 'true' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -481,7 +482,7 @@ jobs:
 
       - name: Close source issue
         if: ${{ steps.mode.outputs.dry_run != 'true' && steps.bootstrap.outputs.bootstrap != 'true' && steps.merge.outputs.merged == 'true' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -527,7 +528,7 @@ jobs:
 
       - name: Leave merge confirmation on PR
         if: ${{ steps.mode.outputs.dry_run != 'true' && steps.bootstrap.outputs.bootstrap != 'true' && steps.merge.outputs.merged == 'true' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |
@@ -559,7 +560,7 @@ jobs:
 
       - name: Re-dispatch dispatcher
         if: ${{ steps.mode.outputs.dry_run != 'true' && steps.bootstrap.outputs.bootstrap != 'true' && steps.merge.outputs.merged == 'true' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           github-token: ${{ env.GH_CONVEYOR_TOKEN }}
           script: |

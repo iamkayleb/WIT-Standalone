@@ -122,7 +122,7 @@ jobs:
     steps:
       - name: Check labels and extract info
         id: check
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const eventName = context.eventName;
@@ -179,7 +179,7 @@ jobs:
     if: |
       needs.route.outputs.should_run_bridge == 'true' &&
       needs.check_labels.outputs.should_run == 'true'
-    uses: ./.github/workflows/reusable-agents-issue-bridge.yml
+    uses: stranske/Workflows/.github/workflows/reusable-agents-issue-bridge.yml@main
     with:
       agent: ${{ needs.check_labels.outputs.agent }}
       issue_number: ${{ needs.check_labels.outputs.issue_number }}
