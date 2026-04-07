@@ -12,8 +12,8 @@ tasks:
     notes: []
   - id: task-02
     title: Function was created successfully
-    status: todo
-    started_at: null
+    status: doing
+    started_at: '2026-04-07T11:34:15Z'
     finished_at: null
     commit: ''
     notes: []
