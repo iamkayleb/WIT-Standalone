@@ -20,11 +20,10 @@ on:
   workflow_run:
     workflows: ["Gate", "CI", "Python CI"]
     types: [completed]
-  workflow_job:
-    types: [completed]
   pull_request_target:
     types:
       - labeled
+
 
 
 permissions:
