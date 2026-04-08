@@ -16,6 +16,7 @@
 name: Autofix
 
 on:
+  workflow_dispatch:    # temporary - for testing
   workflow_run:
     workflows: ["Gate", "CI", "Python CI"]
     types: [completed]
@@ -24,6 +25,7 @@ on:
   pull_request_target:
     types:
       - labeled
+
 
 permissions:
   actions: read
