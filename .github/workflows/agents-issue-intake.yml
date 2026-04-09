@@ -179,7 +179,7 @@ jobs:
     if: |
       needs.route.outputs.should_run_bridge == 'true' &&
       needs.check_labels.outputs.should_run == 'true'
-     permissions:
+    permissions:
       contents: write
       issues: write
       pull-requests: write
