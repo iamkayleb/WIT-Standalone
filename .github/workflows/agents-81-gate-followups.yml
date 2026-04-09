@@ -295,7 +295,7 @@ jobs:
       - mark-running
     # Only run for agent:codex label
     if: needs.evaluate.outputs.agent_type == 'codex'
-    uses: stranske/Workflows/.github/workflows/reusable-codex-run.yml@main
+    uses: iamkayleb/Workflows/.github/workflows/reusable-codex-run.yml@main
     secrets:
       CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
       # Use dedicated KEEPALIVE_APP for isolated rate limit pool (5000/hr)
@@ -328,7 +328,7 @@ jobs:
       (needs.evaluate.outputs.action == 'run' ||
        needs.evaluate.outputs.action == 'fix' ||
        needs.evaluate.outputs.action == 'conflict')
-    uses: stranske/Workflows/.github/workflows/reusable-claude-run.yml@main
+    uses: iamkayleb/Workflows/.github/workflows/reusable-claude-run.yml@main
     secrets: inherit
     with:
       skip: >-
@@ -988,7 +988,7 @@ jobs:
       needs.prepare.outputs.should_run == 'true' &&
       needs.prepare.outputs.agent_type == 'codex'
     name: Run Codex autofix
-    uses: stranske/Workflows/.github/workflows/reusable-codex-run.yml@main
+    uses: iamkayleb/Workflows/.github/workflows/reusable-codex-run.yml@main
     with:
       prompt_file: .github/codex/prompts/autofix_from_ci_failure.md
       mode: autofix
@@ -1006,7 +1006,7 @@ jobs:
       needs.prepare.outputs.should_run == 'true' &&
       needs.prepare.outputs.agent_type == 'claude'
     name: Run Claude autofix
-    uses: stranske/Workflows/.github/workflows/reusable-claude-run.yml@main
+    uses: iamkayleb/Workflows/.github/workflows/reusable-claude-run.yml@main
     with:
       prompt_file: .github/codex/prompts/autofix_from_ci_failure.md
       mode: autofix

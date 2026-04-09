@@ -123,7 +123,7 @@ jobs:
         if: steps.check.outputs.should_run == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
-          repository: stranske/Workflows
+          repository: iamkayleb/Workflows
           path: workflows-scripts
           sparse-checkout: |
             scripts/langchain
