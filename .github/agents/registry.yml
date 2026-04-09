@@ -36,7 +36,7 @@ agents:
     branch_prefix: claude/issue-
     ui_mentions_allowed: false
     automation_logins:
-      - iamkayleb
+      - kayleb-automation-bot
     readiness_candidates:
       - kayleb-automation-bot
     preflight:

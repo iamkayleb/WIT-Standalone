@@ -179,11 +179,6 @@ jobs:
     if: |
       needs.route.outputs.should_run_bridge == 'true' &&
       needs.check_labels.outputs.should_run == 'true'
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-      actions: write
     uses: iamkayleb/Workflows/.github/workflows/reusable-agents-issue-bridge.yml@main
     with:
       agent: ${{ needs.check_labels.outputs.agent }}

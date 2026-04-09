@@ -16,15 +16,14 @@
 name: Autofix
 
 on:
-  workflow_dispatch:    # temporary - for testing
   workflow_run:
     workflows: ["Gate", "CI", "Python CI"]
+    types: [completed]
+  workflow_job:
     types: [completed]
   pull_request_target:
     types:
       - labeled
-
-
 
 permissions:
   actions: read
@@ -560,5 +559,3 @@ jobs:
       service_bot_pat: ${{ secrets.SERVICE_BOT_PAT }}
       WORKFLOWS_APP_ID: ${{ secrets.WORKFLOWS_APP_ID }}
       WORKFLOWS_APP_PRIVATE_KEY: ${{ secrets.WORKFLOWS_APP_PRIVATE_KEY }}
-
-      

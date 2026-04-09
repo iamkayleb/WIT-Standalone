@@ -52,7 +52,7 @@ concurrency:
 
 jobs:
   health:
-    uses: stranske/Workflows/.github/workflows/reusable-agents-pr-health.yml@main
+    uses: iamkayleb/Workflows/.github/workflows/reusable-agents-pr-health.yml@main
     with:
       dry_run: ${{ inputs.dry_run && 'true' || 'false' }}
       max_prs: ${{ inputs.max_prs || '10' }}
