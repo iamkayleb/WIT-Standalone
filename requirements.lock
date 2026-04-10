@@ -12,6 +12,10 @@ coverage==7.13.4
     # via pytest-cov
 iniconfig==2.3.0
     # via pytest
+langchain-core==0.2.0
+    # via workflows-integration (pyproject.toml)
+langchain-openai==0.1.0
+    # via workflows-integration (pyproject.toml)
 librt==0.8.1 ; platform_python_implementation != 'PyPy'
     # via mypy
 mypy==1.19.1
