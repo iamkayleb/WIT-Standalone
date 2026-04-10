@@ -381,7 +381,16 @@ def classify_capabilities(tasks: list[str] | str, acceptance: str) -> Capability
         response = chain.invoke(_prepare_prompt_values(normalized_tasks, acceptance), config=config)
     except TypeError:
         # Fallback if config not supported
-        response = chain.invoke(_prepare_prompt_values(normalized_tasks, acceptance))
+        try:
+            response = chain.invoke(_prepare_prompt_values(normalized_tasks, acceptance))
+        except Exception:
+            result = _fallback_classify(normalized_tasks, acceptance, "LLM call failed")
+            result.provider_used = provider_name
+            return result
+    except Exception:
+        result = _fallback_classify(normalized_tasks, acceptance, "LLM call failed")
+        result.provider_used = provider_name
+        return result
 
     # Extract trace info
     trace_id = None
