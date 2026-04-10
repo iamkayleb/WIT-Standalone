@@ -81,7 +81,7 @@ jobs:
         if: >-
           github.event_name == 'pull_request_target' &&
           steps.api_client_base.outputs.available != 'true'
-        uses: "stranske/Workflows/.github/actions/setup-api-client@6deed4d3937adab2370b4ddf96046ed295efe68f" # v1
+        uses: "iamkayleb/Workflows/.github/actions/setup-api-client@main" # v1
         with:
           secrets: ${{ toJSON(secrets) }}
           github_token: ${{ github.token }}
@@ -137,7 +137,7 @@ jobs:
 
       - name: Setup API client (Workflows fallback)
         if: github.event_name == 'pull_request' && steps.api_client_head.outputs.available != 'true'
-        uses: "stranske/Workflows/.github/actions/setup-api-client@6deed4d3937adab2370b4ddf96046ed295efe68f" # v1
+        uses: "iamkayleb/Workflows/.github/actions/setup-api-client@main" # v1
         with:
           secrets: ${{ toJSON(secrets) }}
           github_token: ${{ github.token }}
