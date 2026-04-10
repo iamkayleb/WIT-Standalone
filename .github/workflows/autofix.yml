@@ -16,15 +16,14 @@
 name: Autofix
 
 on:
-  workflow_dispatch:    # temporary - for testing
   workflow_run:
     workflows: ["Gate", "CI", "Python CI"]
+    types: [completed]
+  workflow_job:
     types: [completed]
   pull_request_target:
     types:
       - labeled
-
-
 
 permissions:
   actions: read
@@ -547,7 +546,7 @@ jobs:
   autofix:
     needs: resolve
     if: needs.resolve.outputs.should_run == 'true'
-    uses: iamkayleb/Workflows/.github/workflows/reusable-18-autofix.yml@main
+    uses: stranske/Workflows/.github/workflows/reusable-18-autofix.yml@main
     with:
       pr_number: ${{ fromJson(needs.resolve.outputs.pr_number) }}
       pr_head_ref: ${{ needs.resolve.outputs.pr_head_ref }}
@@ -560,5 +559,3 @@ jobs:
       service_bot_pat: ${{ secrets.SERVICE_BOT_PAT }}
       WORKFLOWS_APP_ID: ${{ secrets.WORKFLOWS_APP_ID }}
       WORKFLOWS_APP_PRIVATE_KEY: ${{ secrets.WORKFLOWS_APP_PRIVATE_KEY }}
-
-      
