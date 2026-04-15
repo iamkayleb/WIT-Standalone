@@ -33,11 +33,10 @@ logger = logging.getLogger(__name__)
 
 # GitHub Models API endpoint (OpenAI-compatible)
 GITHUB_MODELS_BASE_URL = "https://models.inference.ai.azure.com"
-# Legacy/default model identifier:
-# - Not used for issuing requests to primary providers (OpenAI/Anthropic/GitHub Models)
-# - Still used internally (e.g., default slot model in langchain_client.py)
-# - Kept for backward compatibility with external code that references it
-DEFAULT_MODEL = "codex-mini-latest"
+# Default model for GitHub Models and OpenAI fallback paths.
+# gpt-4.1 is available on both GitHub Models and OpenAI, making it a reliable
+# fallback when no provider-specific model is configured.
+DEFAULT_MODEL = "gpt-4.1"
 ANTHROPIC_API_KEY_ENV = "CLAUDE_API_STRANSKE"
 SHORT_ANALYSIS_CONFIDENCE_CAP = 0.4
 

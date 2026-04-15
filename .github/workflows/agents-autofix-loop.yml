@@ -633,6 +633,30 @@ jobs:
       WORKFLOWS_APP_ID: ${{ secrets.WORKFLOWS_APP_ID }}
       WORKFLOWS_APP_PRIVATE_KEY: ${{ secrets.WORKFLOWS_APP_PRIVATE_KEY }}
 
+  autofix-gemini:
+    needs: prepare
+    if: >-
+      needs.prepare.outputs.should_run == 'true' &&
+      needs.prepare.outputs.agent_type == 'gemini'
+    name: Run Gemini autofix
+    uses: iamkayleb/Workflows/.github/workflows/reusable-gemini-run.yml@main
+    with:
+      prompt_file: .github/codex/prompts/autofix_from_ci_failure.md
+      mode: autofix
+      pr_number: ${{ needs.prepare.outputs.pr_number }}
+      pr_ref: ${{ needs.prepare.outputs.head_ref }}
+      appendix: ${{ needs.prepare.outputs.appendix }}
+      environment: >-
+        ${{
+          needs.prepare.outputs.has_high_privilege == 'true' &&
+          'agent-high-privilege' ||
+          'agent-standard'
+        }}
+    secrets:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      WORKFLOWS_APP_ID: ${{ secrets.WORKFLOWS_APP_ID }}
+      WORKFLOWS_APP_PRIVATE_KEY: ${{ secrets.WORKFLOWS_APP_PRIVATE_KEY }}
+
   needs-human:
     needs: prepare
     if: needs.prepare.outputs.stop_reason == 'max_attempts'
@@ -725,6 +749,7 @@ jobs:
       - prepare
       - autofix
       - autofix-claude
+      - autofix-gemini
     if: always()
     runs-on: ubuntu-latest
     environment: >-
