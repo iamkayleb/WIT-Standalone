@@ -180,7 +180,6 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-
     if: |
       needs.route.outputs.should_run_bridge == 'true' &&
       needs.check_labels.outputs.should_run == 'true'
