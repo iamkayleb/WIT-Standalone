@@ -99,7 +99,7 @@ def _default_slots() -> list[SlotDefinition]:
         SlotDefinition(
             name="slot2", provider=PROVIDER_ANTHROPIC, model="claude-sonnet-4-5-20250929"
         ),
-        SlotDefinition(name="slot3", provider=PROVIDER_GITHUB, model=DEFAULT_MODEL),
+        SlotDefinition(name="slot3", provider=PROVIDER_GITHUB, model="gpt-4.1"),
     ]
 
 

@@ -4,15 +4,15 @@
 
 ## This Is A Consumer Repo
 
-Most workflow logic for this repository lives in `stranske/Workflows`. The consumer repo should only carry repo-specific configuration unless it has an explicitly documented exception.
+Most workflow logic for this repository lives in `iamkayleb/Workflows`. The consumer repo should only carry repo-specific configuration unless it has an explicitly documented exception.
 
 ## Source Of Truth
 
 For infrastructure work, follow this order:
 
-1. `stranske/Workflows` root docs: `README.md`, `docs/WORKFLOW_GUIDE.md`, `docs/ci/WORKFLOWS.md`
-2. `stranske/Workflows/docs/INTEGRATION_GUIDE.md` and `docs/ops/CONSUMER_REPO_MAINTENANCE.md`
-3. The consumer sync source in `stranske/Workflows/templates/consumer-repo/`
+1. `iamkayleb/Workflows` root docs: `README.md`, `docs/WORKFLOW_GUIDE.md`, `docs/ci/WORKFLOWS.md`
+2. `iamkayleb/Workflows/docs/INTEGRATION_GUIDE.md` and `docs/ops/CONSUMER_REPO_MAINTENANCE.md`
+3. The consumer sync source in `iamkayleb/Workflows/templates/consumer-repo/`
 4. This repo's local repo-specific files
 
 If a file is synced from Workflows, fix it in Workflows first.
@@ -56,7 +56,7 @@ Legacy compatibility workflows may still exist during migrations. Do not assume 
 
 Before editing local workflow infrastructure, ask:
 
-**Does this work belong in `stranske/Workflows` instead?**
+**Does this work belong in `iamkayleb/Workflows` instead?**
 
 The answer is usually yes if the change affects any of these:
 
@@ -68,18 +68,18 @@ The answer is usually yes if the change affects any of these:
 
 If yes:
 
-1. Make the source-of-truth change in `stranske/Workflows`
+1. Make the source-of-truth change in `iamkayleb/Workflows`
 2. Update the sync manifest if a consumer-facing file changed
 3. Sync or manually align this repo afterward
 
 ## Useful References
 
-- `stranske/Workflows/README.md`
-- `stranske/Workflows/docs/WORKFLOW_GUIDE.md`
-- `stranske/Workflows/docs/ci/WORKFLOWS.md`
-- `stranske/Workflows/docs/INTEGRATION_GUIDE.md`
-- `stranske/Workflows/docs/ops/CONSUMER_REPO_MAINTENANCE.md`
-- `stranske/Workflows/docs/keepalive/Agents.md`
+- `iamkayleb/Workflows/README.md`
+- `iamkayleb/Workflows/docs/WORKFLOW_GUIDE.md`
+- `iamkayleb/Workflows/docs/ci/WORKFLOWS.md`
+- `iamkayleb/Workflows/docs/INTEGRATION_GUIDE.md`
+- `iamkayleb/Workflows/docs/ops/CONSUMER_REPO_MAINTENANCE.md`
+- `iamkayleb/Workflows/docs/keepalive/Agents.md`
 - `stranske/Travel-Plan-Permission` as a reference consumer
 
 ## Claude-Specific Note
