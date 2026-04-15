@@ -176,6 +176,11 @@ jobs:
   # Agent bridge mode: Call the Workflows repo reusable issue bridge
   bridge:
     needs: [route, check_labels]
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+
     if: |
       needs.route.outputs.should_run_bridge == 'true' &&
       needs.check_labels.outputs.should_run == 'true'
