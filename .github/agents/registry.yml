@@ -36,7 +36,28 @@ agents:
     branch_prefix: claude/issue-
     ui_mentions_allowed: false
     automation_logins:
-      - iamkayleb
+      - kayleb-automation-bot
+    readiness_candidates:
+      - kayleb-automation-bot
+    preflight:
+      assign_user: kayleb-automation-bot
+      command_phrase: ''
+      enabled: true
+    capabilities:
+      pr_keepalive: true
+      pr_autofix: true
+      belt: true
+      verifier_checkbox: true
+
+  gemini:
+    display_name: Gemini
+    runner_workflow: .github/workflows/reusable-gemini-run.yml
+    required_secrets:
+      - GEMINI_API_KEY
+    branch_prefix: gemini/issue-
+    ui_mentions_allowed: false
+    automation_logins:
+      - kayleb-automation-bot
     readiness_candidates:
       - kayleb-automation-bot
     preflight:
