@@ -377,11 +377,29 @@ def classify_capabilities(tasks: list[str] | str, acceptance: str) -> Capability
 
     # Invoke with trace capture
     config = _build_llm_config(operation="capability_check", issue_number=issue_num)
+    prompt_values = _prepare_prompt_values(normalized_tasks, acceptance)
     try:
-        response = chain.invoke(_prepare_prompt_values(normalized_tasks, acceptance), config=config)
+        response = chain.invoke(prompt_values, config=config)
     except TypeError:
         # Fallback if config not supported
-        response = chain.invoke(_prepare_prompt_values(normalized_tasks, acceptance))
+        try:
+            response = chain.invoke(prompt_values)
+        except Exception as exc:
+            result = _fallback_classify(
+                normalized_tasks,
+                acceptance,
+                f"LLM invocation failed: {exc.__class__.__name__}",
+            )
+            result.provider_used = provider_name
+            return result
+    except Exception as exc:
+        result = _fallback_classify(
+            normalized_tasks,
+            acceptance,
+            f"LLM invocation failed: {exc.__class__.__name__}",
+        )
+        result.provider_used = provider_name
+        return result
 
     # Extract trace info
     trace_id = None
