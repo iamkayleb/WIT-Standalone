@@ -24,7 +24,7 @@ ENV_TIMEOUT = "LANGCHAIN_TIMEOUT"
 ENV_MAX_RETRIES = "LANGCHAIN_MAX_RETRIES"
 ENV_SLOT_CONFIG = "LANGCHAIN_SLOT_CONFIG"
 ENV_SLOT_PREFIX = "LANGCHAIN_SLOT"
-ENV_ANTHROPIC_KEY = "CLAUDE_API_STRANSKE"
+ENV_ANTHROPIC_KEY = "CLAUDE_API_KEY"
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_ANTHROPIC = "anthropic"
@@ -97,7 +97,7 @@ def _default_slots() -> list[SlotDefinition]:
     return [
         SlotDefinition(name="slot1", provider=PROVIDER_OPENAI, model="gpt-5.2"),
         SlotDefinition(
-            name="slot2", provider=PROVIDER_ANTHROPIC, model="claude-sonnet-4-5-20250929"
+            name="slot2", provider=PROVIDER_ANTHROPIC, model="claude-opus-4-7"
         ),
         SlotDefinition(name="slot3", provider=PROVIDER_GITHUB, model="gpt-4.1"),
     ]
@@ -176,16 +176,24 @@ def _build_openai_client(
     return chat_openai(**kwargs)
 
 
+def _anthropic_rejects_temperature(model: str) -> bool:
+    """Return True if the Anthropic model rejects the temperature parameter."""
+    name = model.lower().strip()
+    return "opus" in name
+
+
 def _build_anthropic_client(
     chat_anthropic: type, *, model: str, token: str, timeout: int, max_retries: int
 ) -> object:
-    return chat_anthropic(
-        model=model,
-        anthropic_api_key=token,
-        temperature=0.1,
-        timeout=timeout,
-        max_retries=max_retries,
-    )
+    kwargs: dict = {
+        "model": model,
+        "anthropic_api_key": token,
+        "timeout": timeout,
+        "max_retries": max_retries,
+    }
+    if not _anthropic_rejects_temperature(model):
+        kwargs["temperature"] = 0.1
+    return chat_anthropic(**kwargs)
 
 
 def _build_github_client(
