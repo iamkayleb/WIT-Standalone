@@ -85,7 +85,7 @@ def split_topics_with_llm(input_text: str) -> list[dict[str, Any]]:
     client_info = _get_llm_client()
     if not client_info:
         raise RuntimeError(
-            "No LLM client available. Set OPENAI_API_KEY, CLAUDE_API_STRANSKE, or GITHUB_TOKEN."
+            "No LLM client available. Set OPENAI_API_KEY, CLAUDE_API_KEY, or GITHUB_TOKEN."
         )
 
     llm, provider = client_info
