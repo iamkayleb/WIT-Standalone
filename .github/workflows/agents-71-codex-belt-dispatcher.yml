@@ -20,6 +20,11 @@ on:
         required: false
         default: false
         type: boolean
+      base_branch:
+        description: 'Override base branch for the automation PR (defaults to issue marker or repository default)'
+        required: false
+        default: ''
+        type: string
     secrets:
       ACTIONS_BOT_PAT:
         required: false
@@ -63,6 +68,11 @@ on:
         required: false
         default: false
         type: boolean
+      base_branch:
+        description: 'Override base branch for the automation PR (defaults to issue marker or repository default)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -187,7 +197,7 @@ jobs:
             const { withRetry } = await createTokenAwareRetry({ github, core });
             const { data } = await withRetry((client) =>
               client.rest.repos.get({
-                owner: 'stranske',
+                owner: context.repo.owner,
                 repo: 'Workflows'
               })
             );
@@ -277,11 +287,57 @@ jobs:
             ]);
 
             const { data: repoInfo } = await withRetry((client) => client.rest.repos.get({ owner, repo }));
-            const base = repoInfo.default_branch;
-            if (!base) {
+            const defaultBranch = repoInfo.default_branch;
+            if (!defaultBranch) {
               core.setFailed('Repository default branch not available');
               return;
             }
+
+            // Resolve the PR base branch. Precedence:
+            //   1. explicit base_branch input
+            //   2. <!-- base-branch: X --> marker in the issue body
+            //      (set by agents-verify-to-new-pr for eval-branch follow-ups)
+            //   3. repository default branch
+            let base = String('${{ inputs.base_branch }}' || '').trim();
+            let baseSource = base ? 'input' : '';
+            if (!base) {
+              let issueBody = '';
+              try {
+                const { data: issueData } = await withRetry((client) =>
+                  client.rest.issues.get({ owner, repo, issue_number: issueNumber }));
+                issueBody = issueData.body || '';
+              } catch (error) {
+                core.warning(
+                  `Could not fetch issue #${issueNumber} body for base marker: ${error.message}`
+                );
+              }
+              const markerMatch = issueBody.match(/<!--\s*base-branch:\s*([^\s>]+)\s*-->/);
+              if (markerMatch) {
+                base = markerMatch[1].trim();
+                baseSource = 'issue-marker';
+              }
+            }
+            if (!base) {
+              base = defaultBranch;
+              baseSource = 'default';
+            }
+
+            // Guard: never target a base branch that does not exist. A stale or
+            // mistyped marker would otherwise wedge dispatch, so fall back to
+            // the default branch.
+            if (base !== defaultBranch) {
+              try {
+                await withRetry((client) => client.rest.repos.getBranch({ owner, repo, branch: base }));
+              } catch (error) {
+                core.warning(
+                  `Base branch '${base}' (from ${baseSource}) not found; ` +
+                  `falling back to '${defaultBranch}'.`
+                );
+                base = defaultBranch;
+                baseSource = 'default-fallback';
+              }
+            }
+            core.info(`Resolved PR base branch: ${base} (source: ${baseSource})`);
 
             let branchPrefix = 'codex/issue-';
             try {
@@ -320,8 +376,8 @@ jobs:
           branch="${{ steps.pick.outputs.branch }}"
           default_ref="${{ steps.pick.outputs.base }}"
 
-          git config user.name "stranske-automation-bot"
-          git config user.email "stranske-automation-bot@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           existing_ref=$(git ls-remote --heads origin "$branch" || true)
           if [ -n "$existing_ref" ]; then
