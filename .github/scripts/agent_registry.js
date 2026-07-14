@@ -172,7 +172,10 @@ function resolveAgentRoutingFromLabels(labels, { registryPath } = {}) {
     .filter(Boolean)
     .filter((value) => value.startsWith('agent:'));
 
-  const requestedAgents = agentLabels.map((value) => value.slice('agent:'.length));
+  const knownAgents = new Set(Object.keys(registry.agents));
+  const requestedAgents = agentLabels
+    .map((value) => value.slice('agent:'.length))
+    .filter((value) => value === 'auto' || knownAgents.has(value));
   const uniqueRequested = new Set(requestedAgents);
   const hasAuto = uniqueRequested.has('auto');
   const explicitRequested = Array.from(uniqueRequested).filter((value) => value !== 'auto');
@@ -196,6 +199,25 @@ function resolveAgentRoutingFromLabels(labels, { registryPath } = {}) {
     mode = 'auto';
     agentKey = registry.default_agent;
     requested = 'auto';
+  } else {
+    // No explicit `agent:` label. Honor the originating agent recorded on
+    // follow-up issues/PRs via `from:<agent>` or `runner:<agent>` before
+    // falling back to the registry default — otherwise a Claude follow-up
+    // whose `agent:claude` label was dropped (e.g. by the capability/block
+    // flow) is silently rerouted to the default agent.
+    const affinity = labelList
+      .map(normalizeLabel)
+      .filter(Boolean)
+      .map((value) => {
+        const match = value.match(/^(?:from|runner):(.+)$/);
+        return match ? match[1] : null;
+      })
+      .find((value) => value && knownAgents.has(value));
+    if (affinity) {
+      mode = 'affinity';
+      agentKey = affinity;
+      requested = affinity;
+    }
   }
 
   if (!registry.agents[agentKey]) {
@@ -233,6 +255,11 @@ function getRunnerWorkflow(agentKey, { registryPath } = {}) {
     throw new Error(`Agent config missing runner_workflow for agent: ${agentKey}`);
   }
   return workflow;
+}
+
+function getAgentModel(agentKey, { registryPath } = {}) {
+  const config = getAgentConfig(agentKey, { registryPath });
+  return String(config.model || '').trim();
 }
 
 /**
@@ -320,6 +347,7 @@ module.exports = {
   getAllAutomationLogins,
   getAgentConfig,
   getAgentEntries,
+  getAgentModel,
   getAgentPreflightConfigs,
   getKeepaliveMarkerPrefix,
   getReadinessCandidates,
