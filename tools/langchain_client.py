@@ -14,7 +14,11 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.llm_provider import DEFAULT_MODEL, GITHUB_MODELS_BASE_URL
+from tools.llm_provider import (
+    DEFAULT_MODEL,
+    GITHUB_MODELS_BASE_URL,
+    metered_providers_allowed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,7 @@ ENV_TIMEOUT = "LANGCHAIN_TIMEOUT"
 ENV_MAX_RETRIES = "LANGCHAIN_MAX_RETRIES"
 ENV_SLOT_CONFIG = "LANGCHAIN_SLOT_CONFIG"
 ENV_SLOT_PREFIX = "LANGCHAIN_SLOT"
-ENV_ANTHROPIC_KEY = "CLAUDE_API_STRANSKE"
+ENV_ANTHROPIC_KEY = "CLAUDE_API_KEY"
 
 PROVIDER_OPENAI = "openai"
 PROVIDER_ANTHROPIC = "anthropic"
@@ -95,9 +99,9 @@ def _resolve_model(model: str | None) -> str:
 
 def _default_slots() -> list[SlotDefinition]:
     return [
-        SlotDefinition(name="slot1", provider=PROVIDER_OPENAI, model="gpt-5.2"),
+        SlotDefinition(name="slot1", provider=PROVIDER_OPENAI, model="gpt-5.5"),
         SlotDefinition(
-            name="slot2", provider=PROVIDER_ANTHROPIC, model="claude-sonnet-4-5-20250929"
+            name="slot2", provider=PROVIDER_ANTHROPIC, model="claude-opus-4-7"
         ),
         SlotDefinition(name="slot3", provider=PROVIDER_GITHUB, model="gpt-4.1"),
     ]
@@ -176,16 +180,24 @@ def _build_openai_client(
     return chat_openai(**kwargs)
 
 
+def _anthropic_rejects_temperature(model: str) -> bool:
+    """Return True if the Anthropic model rejects the temperature parameter."""
+    name = model.lower().strip()
+    return "opus" in name
+
+
 def _build_anthropic_client(
     chat_anthropic: type, *, model: str, token: str, timeout: int, max_retries: int
 ) -> object:
-    return chat_anthropic(
-        model=model,
-        anthropic_api_key=token,
-        temperature=0.1,
-        timeout=timeout,
-        max_retries=max_retries,
-    )
+    kwargs: dict = {
+        "model": model,
+        "anthropic_api_key": token,
+        "timeout": timeout,
+        "max_retries": max_retries,
+    }
+    if not _anthropic_rejects_temperature(model):
+        kwargs["temperature"] = 0.1
+    return chat_anthropic(**kwargs)
 
 
 def _build_github_client(
@@ -224,6 +236,13 @@ def build_chat_client(
     github_token = os.environ.get("GITHUB_TOKEN")
     openai_token = os.environ.get("OPENAI_API_KEY")
     anthropic_token = os.environ.get(ENV_ANTHROPIC_KEY)
+    # Cost isolation: the metered keys (OPENAI_API_KEY / CLAUDE_API_KEY) are
+    # reserved for verify:compare. Unless the caller explicitly opts in via
+    # LLM_ALLOW_METERED, treat them as absent so this client falls back to the
+    # free GitHub Models tier and cannot spend the verify budget.
+    if not metered_providers_allowed():
+        openai_token = None
+        anthropic_token = None
     if not github_token and not openai_token and not anthropic_token:
         return None
 
@@ -344,6 +363,10 @@ def build_chat_clients(
     github_token = os.environ.get("GITHUB_TOKEN")
     openai_token = os.environ.get("OPENAI_API_KEY")
     anthropic_token = os.environ.get(ENV_ANTHROPIC_KEY)
+    # Cost isolation: metered keys only when explicitly opted in (verify:compare).
+    if not metered_providers_allowed():
+        openai_token = None
+        anthropic_token = None
     if not github_token and not openai_token and not anthropic_token:
         return []
 
